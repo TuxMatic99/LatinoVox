@@ -1,0 +1,39 @@
+escribir("==================================================")
+escribir("[Latino-VM] Generando mundo procedural 30x30...")
+escribir("==================================================")
+
+semilla = 1999
+
+// 1. Generar bosques (4) y lagos (2) usando ruido determinista
+y = 1
+mientras (y < 29)
+    x = 1
+    mientras (x < 29)
+        valor = motor.ruido(x, y, semilla)
+        si (valor < 12)
+            motor.poner_casilla(x, y, 2) // Agua
+        osi (valor > 78)
+            motor.poner_casilla(x, y, 4) // Arbol
+        fin
+        x = x + 1
+    fin
+    y = y + 1
+fin
+
+// 2. Trazar un camino seguro de tierra (5) horizontal y vertical
+i = 2
+mientras (i < 25)
+    motor.poner_casilla(i, 4, 5)
+    motor.poner_casilla(15, i, 5)
+    i = i + 1
+fin
+
+// 3. Posicionar al jugador al inicio del sendero
+motor.colocar_jugador(3, 4)
+
+// 4. Colocar carteles de exploracion
+motor.poner_cartel(5, 4, "Sendero Norte: Cambia la 'semilla' en arranque.lat y pulsa [R].")
+motor.poner_cartel(15, 4, "Cruce Central: El motor C dibuja a 60 FPS; Latino disena el mundo.")
+motor.poner_cartel(15, 14, "Mirador del Bosque: Generado proceduralmente desde Latino.")
+
+escribir("[Latino-VM] Mundo procedural generado con semilla: " .. semilla)
