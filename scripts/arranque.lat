@@ -1,15 +1,15 @@
-semilla = 2026
+semilla = motor.semilla()
 modo = motor.modo_carga()
 
 // ============================================================================
-// MODO 0: ARRANQUE INICIAL (REGISTRO DE NODOS Y DISEÑO DEL FRONTEND GUI)
+// MODO 0: DECLARACION DE NODOS Y DISENO DEL FRONTEND POR PESTANAS (TABS)
 // ============================================================================
 si (modo == 0)
     escribir("==================================================")
-    escribir("[Latino-GUI] Inicializando Nodos y Panel UI...")
+    escribir("[Latino-Frontend] Iniciando LatinoUI Studio v0.4")
     escribir("==================================================")
 
-    // 1. Registro ontologico de bloques del mundo
+    // 1. Registro dinamico de bloques del mundo
     motor.registrar_nodo(0, "Pasto",  175, 215, 155, 0)
     motor.registrar_nodo(1, "Piedra", 105, 110, 120, 1)
     motor.registrar_nodo(2, "Agua",    65, 155, 225, 1)
@@ -19,19 +19,76 @@ si (modo == 0)
     motor.registrar_nodo(6, "Arena",  238, 222, 155, 0)
     motor.registrar_nodo(7, "Lava",   235,  75,  30, 1)
 
-    // 2. Diseno declarativo de la Interfaz Grafica (GUI) desde Latino
-    motor.ui_titulo("Panel LatinoUI")
+    motor.ui_titulo("LatinoUI Studio v0.4")
+
+    // ------------------------------------------------------------------------
+    // PESTANA 1: HERRAMIENTAS Y CONSTRUCCION
+    // ------------------------------------------------------------------------
+    motor.ui_pestana(0, "1. Construir")
+
+    motor.ui_etiqueta("-- Control de Brocha --")
+    motor.ui_deslizador(300, "Tamano Pincel", 1, 5, 1)
+    motor.ui_ayuda(300, "Arrastra para pintar de 1x1 hasta 5x5 casillas a la vez.")
+
+    motor.ui_etiqueta("-- Paleta de Materiales --")
     motor.ui_boton(1, "1: Piedra Solida",   105, 110, 120)
     motor.ui_boton(2, "2: Agua Profunda",    55, 135, 205)
     motor.ui_boton(4, "4: Plantar Arbol",    35, 115,  50)
     motor.ui_boton(5, "5: Camino Tierra",   190, 155, 110)
     motor.ui_boton(6, "6: Arena Playa",     215, 195, 120)
     motor.ui_boton(7, "7: Lava Volcanica",  215,  65,  25)
+
+    motor.ui_etiqueta("-- Inscripcion de Carteles --")
+    motor.ui_caja_texto(100, "Mensaje del Cartel:", "Bienvenidos a LatinoVox!")
+    motor.ui_ayuda(100, "Haz clic para editar el texto que tendra el cartel.")
+
+    motor.ui_boton(11, "Instalar Cartel Aqui", 145, 95, 50)
+    motor.ui_boton(20, "Construir Plaza 5x5",  140, 70, 175)
+    motor.ui_ayuda(20, "Construye una explanada de 5x5 con tu cartel en el centro.")
+
+    // ------------------------------------------------------------------------
+    // PESTANA 2: MUNDO Y EXPLORACION POR CHUNKS
+    // ------------------------------------------------------------------------
+    motor.ui_pestana(1, "2. Mundo")
+
+    motor.ui_etiqueta("-- Estado de Exploracion --")
+    motor.ui_progreso(400, "Chunks Explorados", 9, 256)
+    motor.ui_ayuda(400, "Muestra cuantas regiones de 16x16 has descubierto en el mapa.")
+
+    motor.ui_interruptor(303, "Mostrar Minimapa 2D", 1)
+    motor.ui_ayuda(303, "Activa o desactiva el radar en tiempo real abajo a la izquierda.")
+
+    motor.ui_interruptor(301, "Ver Rejilla Chunks", 1)
+    motor.ui_ayuda(301, "Muestra las divisiones azules de cada region 16x16.")
+
+    motor.ui_etiqueta("-- Semilla Procedural --")
+    motor.ui_caja_texto(101, "Semilla (Numero):", "2026")
+    motor.ui_boton(12, "Regenerar Universo", 45, 130, 115)
+    motor.ui_ayuda(12, "Recrea todos los biomas con la semilla escrita arriba.")
+
+    motor.ui_etiqueta("-- Navegacion Rapida --")
     motor.ui_boton(10, "Ir al Centro (36,36)", 45, 110, 170)
-    motor.ui_boton(20, "Construir Plaza 5x5", 140,  70, 175)
+
+    // ------------------------------------------------------------------------
+    // PESTANA 3: EXPERIENCIA DE USUARIO (UX) Y TEMAS
+    // ------------------------------------------------------------------------
+    motor.ui_pestana(2, "3. UX / Temas")
+
+    motor.ui_etiqueta("-- Ergonomia y Movimiento --")
+    motor.ui_interruptor(302, "Marcha 1-Toque", 1)
+    motor.ui_ayuda(302, "Camina continuamente con pulsar una sola vez WASD.")
+
+    motor.ui_etiqueta("-- Temas Visuales (Frontend) --")
+    motor.ui_boton(50, "Tema Oscuro (Studio)",    45,  55,  75)
+    motor.ui_boton(51, "Tema Claro (Papel)",     180, 185, 195)
+    motor.ui_boton(52, "Tema Esmeralda (Retro)",  25, 115,  85)
+
+    motor.ui_etiqueta("-- Ventanas Emergentes --")
+    motor.ui_boton(60, "Abrir Ventana Modal",    175, 115,  30)
+    motor.ui_ayuda(60, "Despliega un cuadro de dialogo modal controlado desde Latino.")
 
     motor.colocar_jugador(36, 36)
-    motor.notificar("GUI lista: Haz clic en los botones del panel derecho.")
+    motor.notificar("LatinoUI v0.4 listo: Explora las 3 pestanas, la Hotbar y el Minimapa")
 
 // ============================================================================
 // MODO 1: GENERACION BAJO DEMANDA DE UN CHUNK (16x16)
@@ -83,30 +140,40 @@ osi (modo == 1)
 
     si (cx == 2)
         si (cy == 2)
-            motor.poner_cartel(36, 35, "Crucero Central: Usa el Panel GUI derecho con el raton o [TAB] para ocultarlo.")
-            motor.poner_cartel(38, 36, "Prueba el boton morado 'Construir Plaza 5x5' del menu lateral.")
+            motor.poner_cartel(36, 35, "LatinoVox v0.4: Cambia de pestana arriba a la derecha o usa la Hotbar inferior.")
+            motor.poner_cartel(38, 36, "En la pestana '3. UX / Temas' puedes cambiar el tema visual o abrir un Modal.")
         fin
     fin
 
 // ============================================================================
-// MODO 2: GESTOR DE EVENTOS DE LA GUI (CLIC EN BOTONES)
+// MODO 2: REACTOR DE EVENTOS DE LA GUI
 // ============================================================================
 osi (modo == 2)
-    id = motor.boton_clicado()
+    id = motor.evento_id()
 
     si (id >= 1 && id <= 7)
         motor.seleccionar_bloque(id)
-        motor.notificar("LatinoUI -> Herramienta seleccionada: Bloque #" .. id)
+        motor.notificar("Material equipado: Bloque #" .. id)
 
     osi (id == 10)
         motor.colocar_jugador(36, 36)
-        motor.notificar("LatinoUI -> Teletransportado al Crucero Central (36, 36)")
+        motor.notificar("Teletransportado al Crucero Central (36, 36)")
 
-    osi (id == 20)
-        // Accion automatizada en Latino: Construye una plaza de 5x5 alrededor del jugador
+    osi (id == 11)
+        texto_usuario = motor.ui_obtener_texto(100)
         px = motor.jugador_x()
         py = motor.jugador_y()
+        motor.poner_cartel(px, py, texto_usuario)
+        motor.notificar("Cartel instalado: '" .. texto_usuario .. "'")
 
+    osi (id == 12)
+        nueva_semilla = motor.ui_obtener_numero(101)
+        motor.cambiar_semilla(nueva_semilla)
+        motor.notificar("Universo regenerado con semilla: " .. nueva_semilla)
+
+    osi (id == 20)
+        px = motor.jugador_x()
+        py = motor.jugador_y()
         dy = -2
         mientras (dy <= 2)
             dx = -2
@@ -116,8 +183,37 @@ osi (modo == 2)
             fin
             dy = dy + 1
         fin
+        texto_plaza = motor.ui_obtener_texto(100)
+        motor.poner_cartel(px, py - 1, texto_plaza)
+        motor.notificar("Plaza 5x5 construida en (" .. px .. ", " .. py .. ")!")
 
-        motor.poner_cartel(px, py - 1, "Plaza construida automaticamente desde un evento GUI de Latino!")
-        motor.notificar("LatinoUI -> Plaza 5x5 construida en (" .. px .. ", " .. py .. ")")
+    osi (id == 300)
+        tam = motor.ui_obtener_valor(300)
+        motor.fijar_pincel(tam)
+        motor.notificar("Pincel ajustado a: " .. tam .. "x" .. tam)
+
+    osi (id == 301)
+        motor.fijar_rejilla(motor.ui_obtener_valor(301))
+
+    osi (id == 302)
+        motor.fijar_marcha(motor.ui_obtener_valor(302))
+
+    osi (id == 303)
+        motor.fijar_minimapa(motor.ui_obtener_valor(303))
+
+    osi (id == 50)
+        motor.ui_tema(0)
+        motor.notificar("Tema aplicado: Oscuro (Studio)")
+
+    osi (id == 51)
+        motor.ui_tema(1)
+        motor.notificar("Tema aplicado: Claro (Papel)")
+
+    osi (id == 52)
+        motor.ui_tema(2)
+        motor.notificar("Tema aplicado: Esmeralda (Retro)")
+
+    osi (id == 60)
+        motor.ui_modal("Acerca de LatinoVox & LatinoUI v0.4", "Este cuadro de dialogo modal, las pestanas, los temas y el mundo de Chunks 16x16 estan controlados desde Latino (.lat) sobre C11 y Raylib a 60 FPS.")
     fin
 fin

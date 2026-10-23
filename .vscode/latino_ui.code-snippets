@@ -1,0 +1,32 @@
+{
+    "LatinoUI Pestana": {
+        "scope": "latino",
+        "prefix": "ui_pestana",
+        "body": "motor.ui_pestana(${1:0}, \"${2:Nombre Pestana}\")",
+        "description": "Crea una pestaña en el panel Frontend de LatinoUI"
+    },
+    "LatinoUI Boton": {
+        "scope": "latino",
+        "prefix": "ui_boton",
+        "body": "motor.ui_boton(${1:id}, \"${2:Texto Boton}\", ${3:45}, ${4:110}, ${5:170})",
+        "description": "Crea un botón interactivo en LatinoUI"
+    },
+    "LatinoUI Caja de Texto": {
+        "scope": "latino",
+        "prefix": "ui_caja_texto",
+        "body": "motor.ui_caja_texto(${1:100}, \"${2:Etiqueta:}\", \"${3:Valor inicial}\")",
+        "description": "Crea un campo de entrada de texto editable"
+    },
+    "LatinoUI Deslizador": {
+        "scope": "latino",
+        "prefix": "ui_deslizador",
+        "body": "motor.ui_deslizador(${1:300}, \"${2:Etiqueta}\", ${3:1}, ${4:10}, ${5:5})",
+        "description": "Crea un control deslizador (slider)"
+    },
+    "LatinoUI Modal": {
+        "scope": "latino",
+        "prefix": "ui_modal",
+        "body": "motor.ui_modal(\"${1:Titulo Modal}\", \"${2:Mensaje del cuadro de dialogo}\")",
+        "description": "Abre una ventana modal emergente centrada"
+    }
+}
