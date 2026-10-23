@@ -1,39 +1,123 @@
-escribir("==================================================")
-escribir("[Latino-VM] Generando mundo procedural 30x30...")
-escribir("==================================================")
+semilla = 2026
+modo = motor.modo_carga()
 
-semilla = 1999
+// ============================================================================
+// MODO 0: ARRANQUE INICIAL (REGISTRO DE NODOS Y DISEÑO DEL FRONTEND GUI)
+// ============================================================================
+si (modo == 0)
+    escribir("==================================================")
+    escribir("[Latino-GUI] Inicializando Nodos y Panel UI...")
+    escribir("==================================================")
 
-// 1. Generar bosques (4) y lagos (2) usando ruido determinista
-y = 1
-mientras (y < 29)
-    x = 1
-    mientras (x < 29)
-        valor = motor.ruido(x, y, semilla)
-        si (valor < 12)
-            motor.poner_casilla(x, y, 2) // Agua
-        osi (valor > 78)
-            motor.poner_casilla(x, y, 4) // Arbol
+    // 1. Registro ontologico de bloques del mundo
+    motor.registrar_nodo(0, "Pasto",  175, 215, 155, 0)
+    motor.registrar_nodo(1, "Piedra", 105, 110, 120, 1)
+    motor.registrar_nodo(2, "Agua",    65, 155, 225, 1)
+    motor.registrar_nodo(3, "Cartel", 145,  95,  50, 0)
+    motor.registrar_nodo(4, "Arbol",   35, 115,  50, 1)
+    motor.registrar_nodo(5, "Camino", 210, 180, 140, 0)
+    motor.registrar_nodo(6, "Arena",  238, 222, 155, 0)
+    motor.registrar_nodo(7, "Lava",   235,  75,  30, 1)
+
+    // 2. Diseno declarativo de la Interfaz Grafica (GUI) desde Latino
+    motor.ui_titulo("Panel LatinoUI")
+    motor.ui_boton(1, "1: Piedra Solida",   105, 110, 120)
+    motor.ui_boton(2, "2: Agua Profunda",    55, 135, 205)
+    motor.ui_boton(4, "4: Plantar Arbol",    35, 115,  50)
+    motor.ui_boton(5, "5: Camino Tierra",   190, 155, 110)
+    motor.ui_boton(6, "6: Arena Playa",     215, 195, 120)
+    motor.ui_boton(7, "7: Lava Volcanica",  215,  65,  25)
+    motor.ui_boton(10, "Ir al Centro (36,36)", 45, 110, 170)
+    motor.ui_boton(20, "Construir Plaza 5x5", 140,  70, 175)
+
+    motor.colocar_jugador(36, 36)
+    motor.notificar("GUI lista: Haz clic en los botones del panel derecho.")
+
+// ============================================================================
+// MODO 1: GENERACION BAJO DEMANDA DE UN CHUNK (16x16)
+// ============================================================================
+osi (modo == 1)
+    cx = motor.chunk_x()
+    cy = motor.chunk_y()
+    base_x = cx * 16
+    base_y = cy * 16
+
+    ly = 0
+    mientras (ly < 16)
+        lx = 0
+        mientras (lx < 16)
+            gx = base_x + lx
+            gy = base_y + ly
+            valor = motor.ruido(gx, gy, semilla)
+
+            si (valor < 10)
+                motor.poner_casilla(gx, gy, 2)
+            osi (valor < 16)
+                motor.poner_casilla(gx, gy, 6)
+            osi (valor > 96)
+                motor.poner_casilla(gx, gy, 7)
+            osi (valor > 82)
+                motor.poner_casilla(gx, gy, 4)
+            fin
+
+            si (gx == 36)
+                motor.poner_casilla(gx, gy, 5)
+            osi (gy == 36)
+                motor.poner_casilla(gx, gy, 5)
+            fin
+
+            si (gx == 0)
+                motor.poner_casilla(gx, gy, 1)
+            osi (gy == 0)
+                motor.poner_casilla(gx, gy, 1)
+            osi (gx == 255)
+                motor.poner_casilla(gx, gy, 1)
+            osi (gy == 255)
+                motor.poner_casilla(gx, gy, 1)
+            fin
+
+            lx = lx + 1
         fin
-        x = x + 1
+        ly = ly + 1
     fin
-    y = y + 1
+
+    si (cx == 2)
+        si (cy == 2)
+            motor.poner_cartel(36, 35, "Crucero Central: Usa el Panel GUI derecho con el raton o [TAB] para ocultarlo.")
+            motor.poner_cartel(38, 36, "Prueba el boton morado 'Construir Plaza 5x5' del menu lateral.")
+        fin
+    fin
+
+// ============================================================================
+// MODO 2: GESTOR DE EVENTOS DE LA GUI (CLIC EN BOTONES)
+// ============================================================================
+osi (modo == 2)
+    id = motor.boton_clicado()
+
+    si (id >= 1 && id <= 7)
+        motor.seleccionar_bloque(id)
+        motor.notificar("LatinoUI -> Herramienta seleccionada: Bloque #" .. id)
+
+    osi (id == 10)
+        motor.colocar_jugador(36, 36)
+        motor.notificar("LatinoUI -> Teletransportado al Crucero Central (36, 36)")
+
+    osi (id == 20)
+        // Accion automatizada en Latino: Construye una plaza de 5x5 alrededor del jugador
+        px = motor.jugador_x()
+        py = motor.jugador_y()
+
+        dy = -2
+        mientras (dy <= 2)
+            dx = -2
+            mientras (dx <= 2)
+                motor.poner_casilla(px + dx, py + dy, 5)
+                dx = dx + 1
+            fin
+            dy = dy + 1
+        fin
+
+        motor.poner_cartel(px, py - 1, "Plaza construida automaticamente desde un evento GUI de Latino!")
+        motor.notificar("LatinoUI -> Plaza 5x5 construida en (" .. px .. ", " .. py .. ")")
+    fin
 fin
-
-// 2. Trazar un camino seguro de tierra (5) horizontal y vertical
-i = 2
-mientras (i < 25)
-    motor.poner_casilla(i, 4, 5)
-    motor.poner_casilla(15, i, 5)
-    i = i + 1
-fin
-
-// 3. Posicionar al jugador al inicio del sendero
-motor.colocar_jugador(3, 4)
-
-// 4. Colocar carteles de exploracion
-motor.poner_cartel(5, 4, "Sendero Norte: Cambia la 'semilla' en arranque.lat y pulsa [R].")
-motor.poner_cartel(15, 4, "Cruce Central: El motor C dibuja a 60 FPS; Latino disena el mundo.")
-motor.poner_cartel(15, 14, "Mirador del Bosque: Generado proceduralmente desde Latino.")
-
-escribir("[Latino-VM] Mundo procedural generado con semilla: " .. semilla)
