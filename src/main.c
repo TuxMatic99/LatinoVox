@@ -13,8 +13,8 @@
 
 #define TILE_SIZE 48
 #define CHUNK_SIZE 16
-#define WORLD_CHUNKS_X 16
-#define WORLD_CHUNKS_Y 16
+#define WORLD_CHUNKS_X 64
+#define WORLD_CHUNKS_Y 64
 #define MAP_WIDTH  (CHUNK_SIZE * WORLD_CHUNKS_X)
 #define MAP_HEIGHT (CHUNK_SIZE * WORLD_CHUNKS_Y)
 
@@ -25,8 +25,11 @@
 #define MAX_PESTANAS_UI 6
 #define MAX_LUCES_VISIBLES 128
 #define MAX_LOGS_CONSOLA 10
-#define MAX_SEMILLAS_ACTIVAS 64
-#define ARCHIVO_GUARDADO "mundo_chunks.dat"
+#define MAX_SEMILLAS_ACTIVAS 128
+#define MAX_TNT_ACTIVAS 64
+#define MAX_GOLEMS 512
+#define MAX_ENEMIGOS 256
+#define ARCHIVO_GUARDADO "mundo_chunks_v08.dat"
 #define ARCHIVO_TEMP_CONSOLA "/tmp/latino_consola_eval.lat"
 
 typedef enum {
@@ -46,8 +49,18 @@ typedef enum {
     SONIDO_CRAFT = 3,
     SONIDO_PUERTA = 4,
     SONIDO_ALERTA = 5,
-    TOTAL_SONIDOS = 6
+    SONIDO_ESPADA = 6,
+    SONIDO_EXPLOSION = 7,
+    TOTAL_SONIDOS = 8
 } TipoSonido;
+
+typedef enum {
+    BIOMA_BOSQUE = 0,
+    BIOMA_DESIERTO = 1,
+    BIOMA_NIEVE = 2,
+    BIOMA_VOLCAN = 3,
+    BIOMA_PANTANO = 4
+} TipoBioma;
 
 typedef struct {
     bool registrado;
@@ -75,6 +88,31 @@ typedef struct {
     int gy;
     float tiempo_restante;
 } SemillaActiva;
+
+typedef struct {
+    bool activa;
+    int gx;
+    int gy;
+    float tiempo_restante;
+} TntActiva;
+
+typedef struct {
+    bool activo;
+    int gx;
+    int gy;
+    int dir_x;
+    int dir_y;
+    int tarea; // 0=Espera, 1=Escolta/Combate, 2=Minero, 3=Ingeniero Puentes
+} EntidadGolem;
+
+typedef struct {
+    bool activo;
+    int tipo; // 0=Slime, 1=Esqueleto, 2=Demonio Magma
+    int gx;
+    int gy;
+    int hp;
+    int max_hp;
+} EntidadEnemigo;
 
 typedef struct {
     bool activa;
@@ -116,6 +154,15 @@ static int inventario[MAX_NODOS];
 static Chunk mundo[WORLD_CHUNKS_Y][WORLD_CHUNKS_X];
 static CartelMundo lista_carteles[MAX_CARTELES];
 static SemillaActiva lista_semillas[MAX_SEMILLAS_ACTIVAS];
+static TntActiva lista_tnt[MAX_TNT_ACTIVAS];
+static EntidadGolem lista_golems[MAX_GOLEMS];
+static EntidadEnemigo lista_enemigos[MAX_ENEMIGOS];
+
+// Efecto visual de explosión y ataque de espada
+static float tiempo_onda_explosion = 0.0f;
+static int explosion_vis_x = 0;
+static int explosion_vis_y = 0;
+static float tiempo_ataque_espada = 0.0f;
 
 // Fuente Tipográfica UTF-8 y Audio Procedural (raudio)
 static Font fuente_ui;
@@ -135,11 +182,9 @@ static int total_widgets_ui = 0;
 static char titulo_ui[48] = "LatinoUI Studio";
 static bool mostrar_panel_ui = true;
 static int ultimo_evento_id = 0;
-static int ultimo_evento_x = 0;
-static int ultimo_evento_y = 0;
 static int id_caja_activa = -1;
 static int cursor_caja_bytes = 0;
-static int acento_pendiente = 0; // 0 = ninguno, 1 = agudo ('), 2 = virgulilla (~)
+static int acento_pendiente = 0;
 static int id_slider_arrastrando = -1;
 static float scroll_panel_y = 0.0f;
 static int tema_actual = 0;
@@ -149,9 +194,9 @@ static bool modal_activo = false;
 static char modal_titulo[64] = "";
 static char modal_mensaje[384] = "";
 
-// Estado de la Consola .lat Interactiva In-Game (REPL / DevTools)
+// Estado de la Consola .lat Interactiva In-Game [F3]
 static bool consola_activa = false;
-static char entrada_consola[160] = "motor.notificar(\"¡Hola con ñ y áéíóú desde Latino!\")";
+static char entrada_consola[160] = "motor.golem_crear(motor.jugador_x()+1, motor.jugador_y(), 3)";
 static int cursor_consola_bytes = 0;
 static char historial_consola[MAX_LOGS_CONSOLA][160];
 static int total_logs_consola = 0;
@@ -166,23 +211,26 @@ static int chunk_solicitado_x = 0;
 static int chunk_solicitado_y = 0;
 static int semilla_mundo = 2026;
 
-// Estado del Jugador y del Autómata Gólem
-static int jugador_x = 36;
-static int jugador_y = 36;
+// Estado del Jugador, Salud, Combate y Gólems
+static int jugador_x = 512;
+static int jugador_y = 512;
+static int jugador_hp = 100;
+static int jugador_max_hp = 100;
+static int enemigos_derrotados = 0;
 static int dir_mov_x = 0;
 static int dir_mov_y = 0;
+static int ultima_dir_x = 1;
+static int ultima_dir_y = 0;
 static bool modo_un_toque = true;
 static float temporizador_paso = 0.0f;
 static int tamano_pincel = 1;
 static bool mostrar_minimapa = true;
 static bool modo_creativo = false;
+static bool spawner_enemigos_activo = true;
 
-static int golem_x = 38;
-static int golem_y = 37;
-static int golem_tarea = 1; // 0=Espera, 1=Seguir, 2=Minar/Talar, 3=Construir Camino
-static int golem_dir_x = 1;
-static int golem_dir_y = 0;
-static float temporizador_mundo_tick = 0.0f;
+static int golem_tarea_global = 1; // 1=Escolta/Combate, 2=Minar, 3=Puentes
+static float temporizador_ia_tick = 0.0f;
+static float temporizador_spawn_enemigo = 0.0f;
 
 // Ciclo Día/Noche (0.0h a 24.0h)
 static float hora_dia = 10.0f;
@@ -208,12 +256,13 @@ static const TemaUI paleta_temas[3] = {
 
 static void ejecutar_script_latino(int modo, int cx, int cy);
 static void actualizar_chunks_cercanos(void);
+static void reproducir_sonido_motor(int id);
+static void mostrar_notificacion_toast(const char *msg);
 
 // ============================================================================
 // CODIFICADOR Y EDITOR DE CADENAS UTF-8 CON SOPORTE DE CURSOR MÓVIL
 // ============================================================================
 
-// Convierte un Codepoint Unicode (ej. 241 = 'ñ') en su secuencia UTF-8 válida (1 a 4 bytes)
 static int utf8_codificar(int cp, char out[5])
 {
     if (cp < 0x80) {
@@ -236,7 +285,6 @@ static int utf8_codificar(int cp, char out[5])
     return 0;
 }
 
-// Retrocede al inicio del carácter UTF-8 anterior
 static int utf8_prev_char(const char *s, int pos)
 {
     if (pos <= 0) return 0;
@@ -247,7 +295,6 @@ static int utf8_prev_char(const char *s, int pos)
     return pos;
 }
 
-// Avanza al inicio del carácter UTF-8 siguiente
 static int utf8_next_char(const char *s, int pos)
 {
     int len = (int)strlen(s);
@@ -259,7 +306,6 @@ static int utf8_next_char(const char *s, int pos)
     return pos;
 }
 
-// Inserta una secuencia UTF-8 en la posición exacta del cursor
 static void utf8_insertar_en_cursor(char *buf, size_t cap, int *cursor, const char *ins)
 {
     size_t len_buf = strlen(buf);
@@ -274,7 +320,6 @@ static void utf8_insertar_en_cursor(char *buf, size_t cap, int *cursor, const ch
     *cursor += (int)len_ins;
 }
 
-// Borra el carácter UTF-8 completo a la izquierda del cursor (Backspace)
 static void utf8_borrar_atras(char *buf, int *cursor)
 {
     int len = (int)strlen(buf);
@@ -282,12 +327,10 @@ static void utf8_borrar_atras(char *buf, int *cursor)
     if (*cursor > len) *cursor = len;
 
     int prev = utf8_prev_char(buf, *cursor);
-    int bytes_borrar = *cursor - prev;
     memmove(buf + prev, buf + *cursor, (size_t)(len - *cursor + 1));
     *cursor = prev;
 }
 
-// Borra el carácter UTF-8 completo a la derecha del cursor (Supr / Delete)
 static void utf8_borrar_adelante(char *buf, int *cursor)
 {
     int len = (int)strlen(buf);
@@ -297,7 +340,6 @@ static void utf8_borrar_adelante(char *buf, int *cursor)
     memmove(buf + *cursor, buf + next, (size_t)(len - next + 1));
 }
 
-// Construye una cadena visual insertando el símbolo '|' en la posición del cursor
 static void construir_texto_con_cursor(const char *texto, int cursor, bool mostrar_barra, char *salida, size_t cap_salida)
 {
     int len = (int)strlen(texto);
@@ -308,18 +350,15 @@ static void construir_texto_con_cursor(const char *texto, int cursor, bool mostr
         snprintf(salida, cap_salida, "%s", texto);
         return;
     }
-
     snprintf(salida, cap_salida, "%.*s|%s", cursor, texto, texto + cursor);
 }
 
-// Procesa teclado para cualquier buffer UTF-8 con soporte de flechas, tildes muertas y ñ
 static void procesar_edicion_utf8(char *buf, size_t cap, int *cursor)
 {
     int len = (int)strlen(buf);
     if (*cursor < 0) *cursor = 0;
     if (*cursor > len) *cursor = len;
 
-    // Navegación con flechas Izquierda / Derecha, Inicio y Fin
     if (IsKeyPressed(KEY_LEFT) || IsKeyPressedRepeat(KEY_LEFT)) {
         *cursor = utf8_prev_char(buf, *cursor);
         acento_pendiente = 0;
@@ -337,7 +376,6 @@ static void procesar_edicion_utf8(char *buf, size_t cap, int *cursor)
         acento_pendiente = 0;
     }
 
-    // Borrado hacia atrás (Backspace) y hacia adelante (Delete)
     if (IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) {
         if (acento_pendiente != 0) {
             acento_pendiente = 0;
@@ -349,16 +387,13 @@ static void procesar_edicion_utf8(char *buf, size_t cap, int *cursor)
         utf8_borrar_adelante(buf, cursor);
     }
 
-    // Lectura de puntos de código Unicode enviados por el sistema
     int cp = GetCharPressed();
     while (cp > 0) {
-        // Tecla muerta de acento agudo (´ = 180)
         if (cp == 180) {
             acento_pendiente = 1;
             cp = GetCharPressed();
             continue;
         }
-        // Si el usuario presiona '~' para componer ñ
         if (cp == '~' && acento_pendiente == 0) {
             acento_pendiente = 2;
             cp = GetCharPressed();
@@ -367,22 +402,22 @@ static void procesar_edicion_utf8(char *buf, size_t cap, int *cursor)
 
         int cp_final = cp;
         if (acento_pendiente == 1) {
-            if      (cp == 'a') cp_final = 225; // á
-            else if (cp == 'e') cp_final = 233; // é
-            else if (cp == 'i') cp_final = 237; // í
-            else if (cp == 'o') cp_final = 243; // ó
-            else if (cp == 'u') cp_final = 250; // ú
-            else if (cp == 'A') cp_final = 193; // Á
-            else if (cp == 'E') cp_final = 201; // É
-            else if (cp == 'I') cp_final = 205; // Í
-            else if (cp == 'O') cp_final = 211; // Ó
-            else if (cp == 'U') cp_final = 218; // Ú
-            else if (cp == 'n') cp_final = 241; // ñ
-            else if (cp == 'N') cp_final = 209; // Ñ
+            if      (cp == 'a') cp_final = 225;
+            else if (cp == 'e') cp_final = 233;
+            else if (cp == 'i') cp_final = 237;
+            else if (cp == 'o') cp_final = 243;
+            else if (cp == 'u') cp_final = 250;
+            else if (cp == 'A') cp_final = 193;
+            else if (cp == 'E') cp_final = 201;
+            else if (cp == 'I') cp_final = 205;
+            else if (cp == 'O') cp_final = 211;
+            else if (cp == 'U') cp_final = 218;
+            else if (cp == 'n') cp_final = 241;
+            else if (cp == 'N') cp_final = 209;
             acento_pendiente = 0;
         } else if (acento_pendiente == 2) {
-            if      (cp == 'n') cp_final = 241; // ñ
-            else if (cp == 'N') cp_final = 209; // Ñ
+            if      (cp == 'n') cp_final = 241;
+            else if (cp == 'N') cp_final = 209;
             else {
                 utf8_insertar_en_cursor(buf, cap, cursor, "~");
             }
@@ -425,6 +460,10 @@ static Sound generar_sonido_sintetico(float freq_ini, float freq_fin, float dura
 
         if (tipo_onda == 1) {
             muestra = (muestra >= 0.0f ? 0.8f : -0.8f);
+        } else if (tipo_onda == 3) {
+            // Ruido de explosión sísmica
+            float r = (float)((i * 1103515245 + 12345) & 0x7fff) / 16384.0f - 1.0f;
+            muestra = (muestra * 0.4f + r * 0.6f);
         }
 
         datos[i] = (short)(muestra * envolvente * 9500.0f);
@@ -453,6 +492,8 @@ static void inicializar_audio_procedural(void)
     sonidos_motor[SONIDO_CRAFT]     = generar_sonido_sintetico(440.0f,  660.0f, 0.180f, 2);
     sonidos_motor[SONIDO_PUERTA]    = generar_sonido_sintetico(300.0f,  460.0f, 0.110f, 1);
     sonidos_motor[SONIDO_ALERTA]    = generar_sonido_sintetico(220.0f,  140.0f, 0.160f, 1);
+    sonidos_motor[SONIDO_ESPADA]    = generar_sonido_sintetico(580.0f,  210.0f, 0.095f, 0);
+    sonidos_motor[SONIDO_EXPLOSION] = generar_sonido_sintetico(140.0f,   45.0f, 0.340f, 3);
 
     audio_inicializado = true;
 }
@@ -475,7 +516,7 @@ static void cerrar_audio_procedural(void)
 }
 
 // ============================================================================
-// MOTOR TIPOGRÁFICO UTF-8 CON AUTOAJUSTE Y SALTO DE LÍNEA (SIN WARNINGS GCC)
+// MOTOR TIPOGRÁFICO UTF-8 CON AUTOAJUSTE Y SALTO DE LÍNEA
 // ============================================================================
 
 static void inicializar_fuente_utf8(void)
@@ -538,7 +579,6 @@ static void dibujar_texto_ajustado(const char *texto, Rectangle caja, int font_m
     int pos_y = (int)caja.y + ((int)caja.height - font_actual) / 2;
 
     if (ancho_txt > max_w) {
-        // Si el texto es más largo que la caja, mostramos el extremo derecho (útil al escribir)
         const char *vista = texto;
         while (*vista != '\0' && medir_texto_ui(vista, font_actual) > max_w) {
             vista = texto + utf8_next_char(texto, (int)(vista - texto));
@@ -560,7 +600,7 @@ static int procesar_texto_multilinea(const char *texto, Rectangle area, int font
     snprintf(copia, sizeof(copia), "%s", texto);
 
     char linea_actual[256] = "";
-    char linea_prueba[640] = ""; // Buffer amplio para evitar -Wformat-truncation
+    char linea_prueba[640] = "";
     int cursor_y = (int)area.y;
     int salto_y = font_size + 6;
 
@@ -612,8 +652,59 @@ static int procesar_texto_multilinea(const char *texto, Rectangle area, int font
 }
 
 // ============================================================================
-// UTILIDADES DE MEMORIA, CONSOLA Y ACCESO ESPACIAL A CHUNKS
+// GENERADOR PROCEDURAL DE BIOMAS, TERRENO Y ACCESO ESPACIAL (64x64 CHUNKS)
 // ============================================================================
+
+static int calcular_ruido_hash(int x, int y, int s)
+{
+    unsigned int ux = (unsigned int)x;
+    unsigned int uy = (unsigned int)y;
+    unsigned int us = (unsigned int)s;
+    unsigned int h = ux * 374761393U + uy * 668265263U + us * 1442695041U;
+    h = (h ^ (h >> 13)) * 1274126177U;
+    return (int)((h ^ (h >> 16)) % 100U);
+}
+
+// Determina cuál de los 5 Biomas corresponde a la coordenada global (gx, gy)
+static TipoBioma obtener_bioma_en(int gx, int gy)
+{
+    int dx = gx - 512;
+    int dy = gy - 512;
+
+    // El centro (alrededor de 512,512) es siempre Bosque Templado seguro
+    if (abs(dx) < 90 && abs(dy) < 90) {
+        return BIOMA_BOSQUE;
+    }
+
+    // Distribución cardinal + perturbación suave por región
+    int rx = gx / 48;
+    int ry = gy / 48;
+    int jitter = (calcular_ruido_hash(rx, ry, semilla_mundo + 77) % 40) - 20;
+
+    if (dx + jitter > 90 && abs(dy) < 220)  return BIOMA_DESIERTO; // Este: Desierto
+    if (dx + jitter < -90 && abs(dy) < 220) return BIOMA_VOLCAN;   // Oeste: Volcán
+    if (dy + jitter < -90)                  return BIOMA_NIEVE;    // Norte: Tundra Nevada
+    if (dy + jitter > 90)                   return BIOMA_PANTANO;  // Sur: Pantano Místico
+
+    int n_bioma = calcular_ruido_hash(rx, ry, semilla_mundo + 333);
+    if (n_bioma < 25) return BIOMA_BOSQUE;
+    if (n_bioma < 45) return BIOMA_DESIERTO;
+    if (n_bioma < 65) return BIOMA_NIEVE;
+    if (n_bioma < 82) return BIOMA_PANTANO;
+    return BIOMA_VOLCAN;
+}
+
+static const char *nombre_bioma(TipoBioma b)
+{
+    switch (b) {
+        case BIOMA_BOSQUE:   return "Bosque Templado";
+        case BIOMA_DESIERTO: return "Desierto Árido";
+        case BIOMA_NIEVE:    return "Tundra Nevada";
+        case BIOMA_VOLCAN:   return "Tierras Volcánicas";
+        case BIOMA_PANTANO:  return "Pantano Místico";
+        default:             return "Bosque";
+    }
+}
 
 static void agregar_log_consola(const char *texto)
 {
@@ -621,7 +712,6 @@ static void agregar_log_consola(const char *texto)
     if (total_logs_consola < MAX_LOGS_CONSOLA) {
         snprintf(historial_consola[total_logs_consola++], sizeof(historial_consola[0]), "%s", texto);
     } else {
-        // Desplazar bloques con memmove evita la advertencia -Wrestrict de GCC
         memmove(historial_consola[0],
                 historial_consola[1],
                 (size_t)(MAX_LOGS_CONSOLA - 1) * sizeof(historial_consola[0]));
@@ -668,7 +758,20 @@ static void registrar_semilla_activa(int gx, int gy)
             lista_semillas[i].activa = true;
             lista_semillas[i].gx = gx;
             lista_semillas[i].gy = gy;
-            lista_semillas[i].tiempo_restante = 6.0f; // Crece a Árbol en 6 segundos
+            lista_semillas[i].tiempo_restante = 5.0f;
+            return;
+        }
+    }
+}
+
+static void registrar_tnt_activa(int gx, int gy)
+{
+    for (int i = 0; i < MAX_TNT_ACTIVAS; i++) {
+        if (!lista_tnt[i].activa || (lista_tnt[i].gx == gx && lista_tnt[i].gy == gy)) {
+            lista_tnt[i].activa = true;
+            lista_tnt[i].gx = gx;
+            lista_tnt[i].gy = gy;
+            lista_tnt[i].tiempo_restante = 3.0f; // Mecha automática de 3 segundos
             return;
         }
     }
@@ -685,9 +788,8 @@ static void establecer_casilla_mundo(int gx, int gy, int tipo)
     int ly = gy % CHUNK_SIZE;
 
     mundo[cy][cx].casillas[ly][lx] = (unsigned char)tipo;
-    if (tipo == 13) {
-        registrar_semilla_activa(gx, gy);
-    }
+    if (tipo == 13) registrar_semilla_activa(gx, gy);
+    if (tipo == 14) registrar_tnt_activa(gx, gy);
 }
 
 static int obtener_casilla_mundo(int gx, int gy)
@@ -726,7 +828,207 @@ static WidgetUI *buscar_widget_por_id(int id)
 }
 
 // ============================================================================
-// PUENTE FFI (C <-> LATINO): API "motor.*" (INCLUYE EVENTOS Y GÓLEM)
+// GESTIÓN DE EJÉRCITO DE GÓLEMS ILIMITADOS, ENEMIGOS, TNT Y PUENTES
+// ============================================================================
+
+static int contar_golems_activos(void)
+{
+    int c = 0;
+    for (int i = 0; i < MAX_GOLEMS; i++) {
+        if (lista_golems[i].activo) c++;
+    }
+    return c;
+}
+
+static int contar_enemigos_activos(void)
+{
+    int c = 0;
+    for (int i = 0; i < MAX_ENEMIGOS; i++) {
+        if (lista_enemigos[i].activo) c++;
+    }
+    return c;
+}
+
+static void crear_nuevo_golem(int gx, int gy, int tarea)
+{
+    if (gx <= 1) gx = 2;
+    if (gy <= 1) gy = 2;
+    if (gx >= MAP_WIDTH - 2)  gx = MAP_WIDTH - 3;
+    if (gy >= MAP_HEIGHT - 2) gy = MAP_HEIGHT - 3;
+
+    for (int i = 0; i < MAX_GOLEMS; i++) {
+        if (!lista_golems[i].activo) {
+            lista_golems[i].activo = true;
+            lista_golems[i].gx = gx;
+            lista_golems[i].gy = gy;
+            lista_golems[i].tarea = (tarea >= 0 && tarea <= 3) ? tarea : golem_tarea_global;
+            // Asignar dirección inicial variada para cubrir terreno
+            const int dirs[4][2] = { {1,0}, {-1,0}, {0,1}, {0,-1} };
+            int d = i % 4;
+            lista_golems[i].dir_x = dirs[d][0];
+            lista_golems[i].dir_y = dirs[d][1];
+            return;
+        }
+    }
+}
+
+static void crear_enemigo_en(int gx, int gy, int tipo)
+{
+    if (gx <= 1 || gx >= MAP_WIDTH - 2 || gy <= 1 || gy >= MAP_HEIGHT - 2) return;
+    for (int i = 0; i < MAX_ENEMIGOS; i++) {
+        if (!lista_enemigos[i].activo) {
+            lista_enemigos[i].activo = true;
+            lista_enemigos[i].tipo = tipo % 3;
+            lista_enemigos[i].gx = gx;
+            lista_enemigos[i].gy = gy;
+            int hp_base = (tipo == 0) ? 30 : ((tipo == 1) ? 45 : 75);
+            lista_enemigos[i].hp = hp_base;
+            lista_enemigos[i].max_hp = hp_base;
+            return;
+        }
+    }
+}
+
+static void invocar_oleada_enemigos(int cantidad)
+{
+    for (int k = 0; k < cantidad; k++) {
+        int ang_x = ((k % 2 == 0) ? 1 : -1) * (6 + (k % 5));
+        int ang_y = ((k % 3 == 0) ? 1 : -1) * (5 + (k % 4));
+        int ex = jugador_x + ang_x;
+        int ey = jugador_y + ang_y;
+        TipoBioma b = obtener_bioma_en(ex, ey);
+        int tipo = (b == BIOMA_VOLCAN) ? 2 : ((b == BIOMA_DESIERTO || b == BIOMA_NIEVE) ? 1 : 0);
+        crear_enemigo_en(ex, ey, tipo);
+    }
+}
+
+// Detona un bloque de TNT en (bx, by) limpiando 3x3, recolectando recursos y dañando enemigos
+static void detonar_tnt_en(int bx, int by)
+{
+    int recolectados = 0;
+    int enemigos_eliminados = 0;
+
+    for (int dy = -2; dy <= 2; dy++) {
+        for (int dx = -2; dx <= 2; dx++) {
+            if (abs(dx) <= 1 && abs(dy) <= 1) {
+                int tx = bx + dx;
+                int ty = by + dy;
+                if (tx <= 0 || tx >= MAP_WIDTH - 1 || ty <= 0 || ty >= MAP_HEIGHT - 1) continue;
+
+                int actual = obtener_casilla_mundo(tx, ty);
+                if (actual == 1 || actual == 4 || actual == 6 || actual == 16 || actual == 19) {
+                    inventario[actual]++;
+                    recolectados++;
+                }
+                establecer_casilla_mundo(tx, ty, 5); // Deja cráter transitable
+            }
+        }
+    }
+
+    // Dañar enemigos en un radio de 4 casillas de la explosión
+    for (int e = 0; e < MAX_ENEMIGOS; e++) {
+        if (!lista_enemigos[e].activo) continue;
+        if (abs(lista_enemigos[e].gx - bx) <= 3 && abs(lista_enemigos[e].gy - by) <= 3) {
+            lista_enemigos[e].activo = false;
+            inventario[19]++; // Botín: Cristal Rubí
+            enemigos_derrotados++;
+            enemigos_eliminados++;
+        }
+    }
+
+    explosion_vis_x = bx;
+    explosion_vis_y = by;
+    tiempo_onda_explosion = 0.45f;
+    reproducir_sonido_motor(SONIDO_EXPLOSION);
+
+    char msg[160];
+    snprintf(msg, sizeof(msg), "💥 ¡BOOM! Explosión TNT (+%d bloques minados, %d enemigos abatidos)",
+             recolectados, enemigos_eliminados);
+    mostrar_notificacion_toast(msg);
+}
+
+// Construye un puente de madera (8) sobre agua (2) o lava (7) alrededor del jugador o en su dirección
+static bool tender_puente_cercano(void)
+{
+    int puestos = 0;
+
+    // 1. Tender calzada de 4 casillas en la dirección en la que mira el jugador
+    for (int paso = 1; paso <= 4; paso++) {
+        for (int ancho = -1; ancho <= 1; ancho++) {
+            int tx = jugador_x + ultima_dir_x * paso + (ultima_dir_y != 0 ? ancho : 0);
+            int ty = jugador_y + ultima_dir_y * paso + (ultima_dir_x != 0 ? ancho : 0);
+            int t = obtener_casilla_mundo(tx, ty);
+            if (t == 2 || t == 7) {
+                establecer_casilla_mundo(tx, ty, 8);
+                puestos++;
+            }
+        }
+    }
+
+    // 2. Además revisar un radio de 2 casillas alrededor del jugador por si hay agua/lava adyacente
+    for (int dy = -2; dy <= 2; dy++) {
+        for (int dx = -2; dx <= 2; dx++) {
+            int tx = jugador_x + dx;
+            int ty = jugador_y + dy;
+            int t = obtener_casilla_mundo(tx, ty);
+            if (t == 2 || t == 7) {
+                establecer_casilla_mundo(tx, ty, 8);
+                puestos++;
+            }
+        }
+    }
+
+    if (puestos > 0) {
+        reproducir_sonido_motor(SONIDO_CONSTRUIR);
+        mostrar_notificacion_toast("🌉 ¡Puente de Madera tendido sobre el agua/lava!");
+        return true;
+    }
+    return false;
+}
+
+// Ataque con Espada del Jugador [Tecla F]
+static void ejecutar_ataque_espada_jugador(void)
+{
+    tiempo_ataque_espada = 0.28f;
+    reproducir_sonido_motor(SONIDO_ESPADA);
+
+    int golpeados = 0;
+    int abatidos = 0;
+
+    for (int e = 0; e < MAX_ENEMIGOS; e++) {
+        if (!lista_enemigos[e].activo) continue;
+        int dx = lista_enemigos[e].gx - jugador_x;
+        int dy = lista_enemigos[e].gy - jugador_y;
+        if (abs(dx) <= 2 && abs(dy) <= 2) {
+            lista_enemigos[e].hp -= 25;
+            golpeados++;
+            // Empuje (Knockback)
+            int kx = lista_enemigos[e].gx + (dx > 0 ? 1 : (dx < 0 ? -1 : ultima_dir_x));
+            int ky = lista_enemigos[e].gy + (dy > 0 ? 1 : (dy < 0 ? -1 : ultima_dir_y));
+            if (kx > 1 && kx < MAP_WIDTH - 2 && ky > 1 && ky < MAP_HEIGHT - 2) {
+                lista_enemigos[e].gx = kx;
+                lista_enemigos[e].gy = ky;
+            }
+            if (lista_enemigos[e].hp <= 0) {
+                lista_enemigos[e].activo = false;
+                inventario[19]++; // Botín: +1 Cristal Rubí
+                inventario[14]++; // Botín: +1 TNT
+                enemigos_derrotados++;
+                abatidos++;
+            }
+        }
+    }
+
+    if (abatidos > 0) {
+        reproducir_sonido_motor(SONIDO_CRAFT);
+        mostrar_notificacion_toast(TextFormat("⚔️ ¡Enemigo derrotado! (+1 Cristal Rubí, +1 TNT | Total: %d)", enemigos_derrotados));
+    } else if (golpeados > 0) {
+        mostrar_notificacion_toast(TextFormat("⚔️ ¡Golpe de espada a %d enemigo(s)!", golpeados));
+    }
+}
+
+// ============================================================================
+// PUENTE FFI (C <-> LATINO): API "motor.*"
 // ============================================================================
 
 static void motor_registrar_nodo(lat_mv *mv)
@@ -812,56 +1114,110 @@ static void motor_inv_agregar(lat_mv *mv)
     }
 }
 
-// Funciones FFI del Autómata Gólem
+// Funciones FFI de Gólems Ilimitados y Enemigos
+static void motor_golem_crear(lat_mv *mv)
+{
+    lat_objeto *o_tarea = latC_desapilar(mv);
+    lat_objeto *o_y     = latC_desapilar(mv);
+    lat_objeto *o_x     = latC_desapilar(mv);
+    int gx = (int)latC_checar_numerico(mv, o_x);
+    int gy = (int)latC_checar_numerico(mv, o_y);
+    int tarea = (int)latC_checar_numerico(mv, o_tarea);
+    crear_nuevo_golem(gx, gy, tarea);
+}
+
 static void motor_golem_colocar(lat_mv *mv)
 {
     lat_objeto *o_y = latC_desapilar(mv);
     lat_objeto *o_x = latC_desapilar(mv);
     int gx = (int)latC_checar_numerico(mv, o_x);
     int gy = (int)latC_checar_numerico(mv, o_y);
-    if (gx > 0 && gx < MAP_WIDTH - 1 && gy > 0 && gy < MAP_HEIGHT - 1) {
-        golem_x = gx;
-        golem_y = gy;
+    crear_nuevo_golem(gx, gy, golem_tarea_global);
+}
+
+static void motor_golem_total(lat_mv *mv)
+{
+    latC_apilar(mv, latC_crear_numerico(mv, (double)contar_golems_activos()));
+}
+
+static void motor_golem_reunir(lat_mv *mv)
+{
+    (void)mv;
+    int idx = 0;
+    for (int i = 0; i < MAX_GOLEMS; i++) {
+        if (lista_golems[i].activo) {
+            int ox = (idx % 5) - 2;
+            int oy = ((idx / 5) % 5) - 2;
+            if (ox == 0 && oy == 0) ox = 1;
+            lista_golems[i].gx = jugador_x + ox;
+            lista_golems[i].gy = jugador_y + oy;
+            idx++;
+        }
     }
 }
 
-static void motor_golem_x(lat_mv *mv)
+static void motor_golem_limpiar(lat_mv *mv)
 {
-    latC_apilar(mv, latC_crear_numerico(mv, (double)golem_x));
-}
-
-static void motor_golem_y(lat_mv *mv)
-{
-    latC_apilar(mv, latC_crear_numerico(mv, (double)golem_y));
+    (void)mv;
+    memset(lista_golems, 0, sizeof(lista_golems));
 }
 
 static void motor_golem_tarea(lat_mv *mv)
 {
-    latC_apilar(mv, latC_crear_numerico(mv, (double)golem_tarea));
+    latC_apilar(mv, latC_crear_numerico(mv, (double)golem_tarea_global));
 }
 
 static void motor_golem_fijar_tarea(lat_mv *mv)
 {
     lat_objeto *o_t = latC_desapilar(mv);
-    golem_tarea = (int)latC_checar_numerico(mv, o_t);
+    golem_tarea_global = (int)latC_checar_numerico(mv, o_t);
+    for (int i = 0; i < MAX_GOLEMS; i++) {
+        if (lista_golems[i].activo) {
+            lista_golems[i].tarea = golem_tarea_global;
+        }
+    }
 }
 
-static void motor_golem_fijar_rumbo(lat_mv *mv)
+static void motor_enemigo_oleada(lat_mv *mv)
 {
-    lat_objeto *o_dy = latC_desapilar(mv);
-    lat_objeto *o_dx = latC_desapilar(mv);
-    golem_dir_x = (int)latC_checar_numerico(mv, o_dx);
-    golem_dir_y = (int)latC_checar_numerico(mv, o_dy);
+    lat_objeto *o_cant = latC_desapilar(mv);
+    int cant = (int)latC_checar_numerico(mv, o_cant);
+    if (cant < 1) cant = 1;
+    if (cant > 30) cant = 30;
+    invocar_oleada_enemigos(cant);
 }
 
-static void motor_golem_dir_x(lat_mv *mv)
+static void motor_enemigo_limpiar(lat_mv *mv)
 {
-    latC_apilar(mv, latC_crear_numerico(mv, (double)golem_dir_x));
+    (void)mv;
+    memset(lista_enemigos, 0, sizeof(lista_enemigos));
 }
 
-static void motor_golem_dir_y(lat_mv *mv)
+static void motor_fijar_enemigos(lat_mv *mv)
 {
-    latC_apilar(mv, latC_crear_numerico(mv, (double)golem_dir_y));
+    lat_objeto *o_est = latC_desapilar(mv);
+    spawner_enemigos_activo = ((int)latC_checar_numerico(mv, o_est) != 0);
+}
+
+static void motor_curar_jugador(lat_mv *mv)
+{
+    lat_objeto *o_hp = latC_desapilar(mv);
+    int curar = (int)latC_checar_numerico(mv, o_hp);
+    jugador_hp += curar;
+    if (jugador_hp > jugador_max_hp) jugador_hp = jugador_max_hp;
+}
+
+static void motor_construir_puente(lat_mv *mv)
+{
+    (void)mv;
+    if (!tender_puente_cercano()) {
+        // Si no hay agua al lado, coloca 3 bloques de puente de madera frente al jugador
+        for (int p = 1; p <= 3; p++) {
+            establecer_casilla_mundo(jugador_x + ultima_dir_x * p, jugador_y + ultima_dir_y * p, 8);
+        }
+        reproducir_sonido_motor(SONIDO_CONSTRUIR);
+        mostrar_notificacion_toast("🌉 ¡Pasarela de Madera de 3 bloques construida frente a ti!");
+    }
 }
 
 static void motor_ui_resumen_inv(lat_mv *mv)
@@ -1118,16 +1474,6 @@ static void motor_evento_id(lat_mv *mv)
     latC_apilar(mv, latC_crear_numerico(mv, (double)ultimo_evento_id));
 }
 
-static void motor_evento_x(lat_mv *mv)
-{
-    latC_apilar(mv, latC_crear_numerico(mv, (double)ultimo_evento_x));
-}
-
-static void motor_evento_y(lat_mv *mv)
-{
-    latC_apilar(mv, latC_crear_numerico(mv, (double)ultimo_evento_y));
-}
-
 static void motor_seleccionar_bloque(lat_mv *mv)
 {
     lat_objeto *o_id = latC_desapilar(mv);
@@ -1202,6 +1548,7 @@ static void motor_cambiar_semilla(lat_mv *mv)
     memset(mundo, 0, sizeof(mundo));
     memset(lista_carteles, 0, sizeof(lista_carteles));
     memset(lista_semillas, 0, sizeof(lista_semillas));
+    memset(lista_tnt, 0, sizeof(lista_tnt));
     total_chunks_generados = 0;
 }
 
@@ -1309,14 +1656,11 @@ static void motor_ruido(lat_mv *mv)
     lat_objeto *o_y       = latC_desapilar(mv);
     lat_objeto *o_x       = latC_desapilar(mv);
 
-    unsigned int x = (unsigned int)latC_checar_numerico(mv, o_x);
-    unsigned int y = (unsigned int)latC_checar_numerico(mv, o_y);
-    unsigned int s = (unsigned int)latC_checar_numerico(mv, o_semilla);
+    int x = (int)latC_checar_numerico(mv, o_x);
+    int y = (int)latC_checar_numerico(mv, o_y);
+    int s = (int)latC_checar_numerico(mv, o_semilla);
 
-    unsigned int h = x * 374761393U + y * 668265263U + s * 1442695041U;
-    h = (h ^ (h >> 13)) * 1274126177U;
-    int resultado = (int)((h ^ (h >> 16)) % 100U);
-
+    int resultado = calcular_ruido_hash(x, y, s);
     latC_apilar(mv, latC_crear_numerico(mv, (double)resultado));
 }
 
@@ -1328,14 +1672,18 @@ static const lat_CReg libmotor[] = {
     {"abrir_consola",      motor_abrir_consola,      0},
     {"inv_cantidad",       motor_inv_cantidad,       1},
     {"inv_agregar",        motor_inv_agregar,        2},
+    {"golem_crear",        motor_golem_crear,        3},
     {"golem_colocar",      motor_golem_colocar,      2},
-    {"golem_x",            motor_golem_x,            0},
-    {"golem_y",            motor_golem_y,            0},
+    {"golem_total",        motor_golem_total,        0},
+    {"golem_reunir",       motor_golem_reunir,       0},
+    {"golem_limpiar",      motor_golem_limpiar,      0},
     {"golem_tarea",        motor_golem_tarea,        0},
     {"golem_fijar_tarea",  motor_golem_fijar_tarea,  1},
-    {"golem_fijar_rumbo",  motor_golem_fijar_rumbo,  2},
-    {"golem_dir_x",        motor_golem_dir_x,        0},
-    {"golem_dir_y",        motor_golem_dir_y,        0},
+    {"enemigo_oleada",     motor_enemigo_oleada,     1},
+    {"enemigo_limpiar",    motor_enemigo_limpiar,    0},
+    {"fijar_enemigos",     motor_fijar_enemigos,     1},
+    {"curar_jugador",      motor_curar_jugador,      1},
+    {"construir_puente",   motor_construir_puente,   0},
     {"ui_resumen_inv",     motor_ui_resumen_inv,     0},
     {"ui_titulo",          motor_ui_titulo,          1},
     {"ui_pestana",         motor_ui_pestana,         2},
@@ -1352,8 +1700,6 @@ static const lat_CReg libmotor[] = {
     {"ui_obtener_numero",  motor_ui_obtener_numero,  1},
     {"ui_obtener_valor",   motor_ui_obtener_valor,   1},
     {"evento_id",          motor_evento_id,          0},
-    {"evento_x",           motor_evento_x,           0},
-    {"evento_y",           motor_evento_y,           0},
     {"boton_clicado",      motor_evento_id,          0},
     {"seleccionar_bloque", motor_seleccionar_bloque, 1},
     {"fijar_pincel",       motor_fijar_pincel,       1},
@@ -1380,7 +1726,7 @@ static const lat_CReg libmotor[] = {
 };
 
 // ============================================================================
-// EJECUCIÓN DE SCRIPTS LATINO Y EVALUADOR DE CONSOLA IN-GAME (REPL)
+// EJECUCIÓN DE SCRIPTS LATINO Y GENERACIÓN MULTI-BIOMA DE CHUNKS (16x16)
 // ============================================================================
 
 static void ejecutar_script_latino(int modo, int cx, int cy)
@@ -1462,19 +1808,91 @@ static void evaluar_comando_consola_latino(const char *codigo)
     actualizar_chunks_cercanos();
 }
 
+// Genera un Chunk de 16x16 según su Bioma, colocando puentes automáticos en las avenidas centrales
 static void generar_chunk_bajo_demanda(int cx, int cy)
 {
     if (cx < 0 || cx >= WORLD_CHUNKS_X || cy < 0 || cy >= WORLD_CHUNKS_Y) return;
     if (mundo[cy][cx].generado) return;
 
     mundo[cy][cx].generado = true;
-    memset(mundo[cy][cx].casillas, 0, sizeof(mundo[cy][cx].casillas));
-    ejecutar_script_latino(1, cx, cy);
-    total_chunks_generados++;
+    int base_x = cx * CHUNK_SIZE;
+    int base_y = cy * CHUNK_SIZE;
 
+    for (int ly = 0; ly < CHUNK_SIZE; ly++) {
+        for (int lx = 0; lx < CHUNK_SIZE; lx++) {
+            int gx = base_x + lx;
+            int gy = base_y + ly;
+
+            // Bordes del universo 1024x1024
+            if (gx == 0 || gy == 0 || gx == MAP_WIDTH - 1 || gy == MAP_HEIGHT - 1) {
+                mundo[cy][cx].casillas[ly][lx] = 1;
+                continue;
+            }
+
+            TipoBioma bioma = obtener_bioma_en(gx, gy);
+            int v = calcular_ruido_hash(gx, gy, semilla_mundo);
+            int tipo = 0;
+
+            if (bioma == BIOMA_BOSQUE) {
+                tipo = 0; // Pasto
+                if (v < 9)       tipo = 2; // Agua
+                else if (v < 14) tipo = 6; // Costa de Arena
+                else if (v > 82) tipo = 4; // Árbol
+                else if (v == 80) tipo = 1; // Roca
+            } else if (bioma == BIOMA_DESIERTO) {
+                tipo = 6; // Arena
+                if (v < 3)       tipo = 2;  // Oasis de Agua
+                else if (v > 90) tipo = 16; // Cactus
+                else if (v > 85) tipo = 1;  // Roca del desierto
+            } else if (bioma == BIOMA_NIEVE) {
+                tipo = 15; // Nieve
+                if (v < 14)      tipo = 17; // Lago de Hielo transitable
+                else if (v > 84) tipo = 4;  // Pino
+                else if (v > 80) tipo = 1;  // Roca helada
+            } else if (bioma == BIOMA_VOLCAN) {
+                tipo = 18; // Basalto oscuro
+                if (v < 14)      tipo = 7;  // Fosa de Lava
+                else if (v > 94) tipo = 19; // Cristal Rubí luminoso
+                else if (v > 80) tipo = 1;  // Roca volcánica
+            } else {
+                // BIOMA_PANTANO
+                tipo = 0;
+                if (v < 18)      tipo = 2;  // Ciénaga de Agua
+                else if (v > 76) tipo = 4;  // Árbol de pantano
+                else if (v == 75) tipo = 19; // Cristal místico
+            }
+
+            // Grandes carreteras reales que cruzan el mundo en X=512 y Y=512
+            // Si cruzan agua (2) o lava (7), tienden automáticamente Puente de Madera (8)
+            if (gx == 512 || gy == 512) {
+                if (tipo == 2 || tipo == 7) {
+                    tipo = 8; // Puente de Madera sobre el agua/lava
+                } else {
+                    tipo = 5; // Camino Real
+                }
+            }
+
+            mundo[cy][cx].casillas[ly][lx] = (unsigned char)tipo;
+        }
+    }
+
+    total_chunks_generados++;
     WidgetUI *w_prog = buscar_widget_por_id(400);
     if (w_prog != NULL && w_prog->tipo == WIDGET_PROGRESO) {
         w_prog->valor = total_chunks_generados;
+    }
+
+    // Probabilidad de generar un enemigo natural en chunks nuevos alejados del centro
+    if (spawner_enemigos_activo && (abs(cx - 32) > 1 || abs(cy - 32) > 1)) {
+        if ((calcular_ruido_hash(cx, cy, semilla_mundo + 99) % 100) < 45) {
+            int ex = base_x + 8;
+            int ey = base_y + 8;
+            if (obtener_casilla_mundo(ex, ey) != 2 && obtener_casilla_mundo(ex, ey) != 7) {
+                TipoBioma b = obtener_bioma_en(ex, ey);
+                int t_enem = (b == BIOMA_VOLCAN) ? 2 : ((b == BIOMA_DESIERTO || b == BIOMA_NIEVE) ? 1 : 0);
+                crear_enemigo_en(ex, ey, t_enem);
+            }
+        }
     }
 }
 
@@ -1490,6 +1908,177 @@ static void actualizar_chunks_cercanos(void)
     }
 }
 
+// ============================================================================
+// SIMULACIÓN EN TIEMPO REAL DEL EJÉRCITO DE GÓLEMS Y DE LOS ENEMIGOS
+// ============================================================================
+
+static bool casilla_es_transitable(int gx, int gy)
+{
+    if (gx < 0 || gx >= MAP_WIDTH || gy < 0 || gy >= MAP_HEIGHT) return false;
+    int tipo = obtener_casilla_mundo(gx, gy);
+    if (tipo >= 0 && tipo < MAX_NODOS && tabla_nodos[tipo].registrado) {
+        return !tabla_nodos[tipo].es_solido;
+    }
+    return false;
+}
+
+static void actualizar_ia_golems_y_enemigos(void)
+{
+    // 1. Actualizar todos los Gólems activos (hasta 512 Gólems simultáneos)
+    for (int i = 0; i < MAX_GOLEMS; i++) {
+        if (!lista_golems[i].activo) continue;
+        EntidadGolem *g = &lista_golems[i];
+        if (g->tarea == 0) continue;
+
+        generar_chunk_bajo_demanda(g->gx / CHUNK_SIZE, g->gy / CHUNK_SIZE);
+
+        // Prioridad universal del Gólem: si tiene un enemigo al lado (distancia <= 2), ¡lo ataca!
+        bool ataco_enemigo = false;
+        for (int e = 0; e < MAX_ENEMIGOS; e++) {
+            if (!lista_enemigos[e].activo) continue;
+            int edx = lista_enemigos[e].gx - g->gx;
+            int edy = lista_enemigos[e].gy - g->gy;
+            if (abs(edx) <= 2 && abs(edy) <= 2) {
+                lista_enemigos[e].hp -= 15;
+                if (lista_enemigos[e].hp <= 0) {
+                    lista_enemigos[e].activo = false;
+                    inventario[19]++;
+                    enemigos_derrotados++;
+                }
+                ataco_enemigo = true;
+                break;
+            }
+        }
+        if (ataco_enemigo) continue;
+
+        if (g->tarea == 1) {
+            // TAREA 1: ESCOLTA Y CAZADOR DE ENEMIGOS
+            int obj_x = jugador_x;
+            int obj_y = jugador_y;
+            int dist_min = 999;
+
+            // Buscar si hay algún enemigo en un radio de 8 casillas para interceptarlo
+            for (int e = 0; e < MAX_ENEMIGOS; e++) {
+                if (!lista_enemigos[e].activo) continue;
+                int d = abs(lista_enemigos[e].gx - g->gx) + abs(lista_enemigos[e].gy - g->gy);
+                if (d < 14 && d < dist_min) {
+                    dist_min = d;
+                    obj_x = lista_enemigos[e].gx;
+                    obj_y = lista_enemigos[e].gy;
+                }
+            }
+
+            int nx = g->gx;
+            int ny = g->gy;
+            int margen = (dist_min < 999) ? 0 : (1 + (i % 3));
+            if (obj_x > g->gx + margen)      nx++;
+            else if (obj_x < g->gx - margen) nx--;
+            if (obj_y > g->gy + margen)      ny++;
+            else if (obj_y < g->gy - margen) ny--;
+
+            if (casilla_es_transitable(nx, ny)) {
+                g->gx = nx;
+                g->gy = ny;
+            }
+        } else if (g->tarea == 2) {
+            // TAREA 2: MINERO Y LEÑADOR AUTÓNOMO
+            bool recolecto = false;
+            for (int dy = -2; dy <= 2 && !recolecto; dy++) {
+                for (int dx = -2; dx <= 2 && !recolecto; dx++) {
+                    int tx = g->gx + dx;
+                    int ty = g->gy + dy;
+                    if (tx <= 1 || tx >= MAP_WIDTH - 2 || ty <= 1 || ty >= MAP_HEIGHT - 2) continue;
+                    int t = obtener_casilla_mundo(tx, ty);
+                    if (t == 4 || t == 1 || t == 16 || t == 19) {
+                        inventario[t]++;
+                        establecer_casilla_mundo(tx, ty, 0);
+                        g->gx = tx;
+                        g->gy = ty;
+                        recolecto = true;
+                    }
+                }
+            }
+            if (!recolecto) {
+                int nx = g->gx + g->dir_x;
+                int ny = g->gy + g->dir_y;
+                if (nx <= 2 || nx >= MAP_WIDTH - 3 || ny <= 2 || ny >= MAP_HEIGHT - 3 ||
+                    obtener_casilla_mundo(nx, ny) == 2 || obtener_casilla_mundo(nx, ny) == 7) {
+                    // Girar 90 grados si topa con agua o borde
+                    int tmp = g->dir_x;
+                    g->dir_x = -g->dir_y;
+                    g->dir_y = tmp;
+                } else {
+                    g->gx = nx;
+                    g->gy = ny;
+                }
+            }
+        } else if (g->tarea == 3) {
+            // TAREA 3: INGENIERO DE PUENTES DE MADERA Y CAMINOS
+            int nx = g->gx + g->dir_x;
+            int ny = g->gy + g->dir_y;
+            if (nx > 2 && nx < MAP_WIDTH - 3 && ny > 2 && ny < MAP_HEIGHT - 3) {
+                // Construye una calzada/puente de 3 casillas de ancho al avanzar
+                for (int lat = -1; lat <= 1; lat++) {
+                    int bx = nx + (g->dir_y != 0 ? lat : 0);
+                    int by = ny + (g->dir_x != 0 ? lat : 0);
+                    int dest = obtener_casilla_mundo(bx, by);
+                    if (dest == 2 || dest == 7) {
+                        establecer_casilla_mundo(bx, by, 8); // Agua o Lava -> Puente de Madera (8)
+                    } else if (lat == 0 && dest != 8 && dest != 5 && dest != 3) {
+                        if (dest == 4 || dest == 1 || dest == 16) inventario[dest]++;
+                        establecer_casilla_mundo(bx, by, 5); // Tierra -> Camino (5)
+                    }
+                }
+                g->gx = nx;
+                g->gy = ny;
+            } else {
+                g->dir_x = -g->dir_x;
+                g->dir_y = -g->dir_y;
+            }
+        }
+    }
+
+    // 2. Actualizar IA de Enemigos Hostiles cercanos al jugador
+    for (int e = 0; e < MAX_ENEMIGOS; e++) {
+        if (!lista_enemigos[e].activo) continue;
+        EntidadEnemigo *en = &lista_enemigos[e];
+
+        int dx = jugador_x - en->gx;
+        int dy = jugador_y - en->gy;
+        int dist = abs(dx) + abs(dy);
+
+        if (dist > 48) continue; // Enemigos muy lejanos hibernan para ahorrar CPU
+
+        if (dist <= 1) {
+            // El enemigo ataca al jugador
+            if (!modo_creativo) {
+                int dano = (en->tipo == 2) ? 8 : ((en->tipo == 1) ? 5 : 3);
+                jugador_hp -= dano;
+                reproducir_sonido_motor(SONIDO_ALERTA);
+                if (jugador_hp <= 0) {
+                    jugador_hp = jugador_max_hp;
+                    jugador_x = 512;
+                    jugador_y = 512;
+                    actualizar_chunks_cercanos();
+                    mostrar_notificacion_toast("💀 ¡Fuiste abatido! Has reaparecido en el Crucero Central (512,512).");
+                }
+            }
+        } else if (dist <= 18) {
+            // Perseguir al jugador
+            int nx = en->gx + (dx > 0 ? 1 : (dx < 0 ? -1 : 0));
+            int ny = en->gy + (dy > 0 ? 1 : (dy < 0 ? -1 : 0));
+            if (casilla_es_transitable(nx, ny)) {
+                en->gx = nx;
+                en->gy = ny;
+            } else if (casilla_es_transitable(nx, en->gy)) {
+                en->gx = nx;
+            } else if (casilla_es_transitable(en->gx, ny)) {
+                en->gy = ny;
+            }
+        }
+    }
+}
+
 static void inicializar_mundo_con_latino(bool conservar_estado)
 {
     int prev_x = jugador_x;
@@ -1500,6 +2089,12 @@ static void inicializar_mundo_con_latino(bool conservar_estado)
     memset(mundo, 0, sizeof(mundo));
     memset(lista_carteles, 0, sizeof(lista_carteles));
     memset(lista_semillas, 0, sizeof(lista_semillas));
+    memset(lista_tnt, 0, sizeof(lista_tnt));
+    if (!conservar_estado) {
+        memset(lista_golems, 0, sizeof(lista_golems));
+        memset(lista_enemigos, 0, sizeof(lista_enemigos));
+        jugador_hp = 100;
+    }
     memset(tabla_nodos, 0, sizeof(tabla_nodos));
     memset(inventario, 0, sizeof(inventario));
     memset(widgets_ui, 0, sizeof(widgets_ui));
@@ -1542,15 +2137,15 @@ static void guardar_mundo_disco(void)
     if (f != NULL) {
         fwrite(&jugador_x, sizeof(int), 1, f);
         fwrite(&jugador_y, sizeof(int), 1, f);
-        fwrite(&golem_x, sizeof(int), 1, f);
-        fwrite(&golem_y, sizeof(int), 1, f);
+        fwrite(&jugador_hp, sizeof(int), 1, f);
         fwrite(&total_chunks_generados, sizeof(int), 1, f);
         fwrite(inventario, sizeof(inventario), 1, f);
+        fwrite(lista_golems, sizeof(lista_golems), 1, f);
         fwrite(mundo, sizeof(mundo), 1, f);
         fwrite(lista_carteles, sizeof(lista_carteles), 1, f);
         fclose(f);
         reproducir_sonido_motor(SONIDO_CRAFT);
-        mostrar_notificacion_toast("¡Mundo, Gólem e Inventario guardados en disco!");
+        mostrar_notificacion_toast("¡Mundo 1024x1024, Gólems e Inventario guardados!");
     }
 }
 
@@ -1560,10 +2155,10 @@ static void cargar_mundo_disco(void)
     if (f != NULL) {
         if (fread(&jugador_x, sizeof(int), 1, f) == 1 &&
             fread(&jugador_y, sizeof(int), 1, f) == 1 &&
-            fread(&golem_x, sizeof(int), 1, f) == 1 &&
-            fread(&golem_y, sizeof(int), 1, f) == 1 &&
+            fread(&jugador_hp, sizeof(int), 1, f) == 1 &&
             fread(&total_chunks_generados, sizeof(int), 1, f) == 1 &&
             fread(inventario, sizeof(inventario), 1, f) == 1 &&
+            fread(lista_golems, sizeof(lista_golems), 1, f) == 1 &&
             fread(mundo, sizeof(mundo), 1, f) == 1 &&
             fread(lista_carteles, sizeof(lista_carteles), 1, f) == 1) {
             dir_mov_x = 0;
@@ -1571,23 +2166,13 @@ static void cargar_mundo_disco(void)
             WidgetUI *w_prog = buscar_widget_por_id(400);
             if (w_prog != NULL) w_prog->valor = total_chunks_generados;
             reproducir_sonido_motor(SONIDO_CRAFT);
-            mostrar_notificacion_toast("¡Mundo, Gólem e Inventario cargados correctamente!");
+            mostrar_notificacion_toast("¡Mundo 1024x1024, Gólems e Inventario cargados!");
         }
         fclose(f);
     } else {
         reproducir_sonido_motor(SONIDO_ALERTA);
-        mostrar_notificacion_toast("Aún no existe un archivo guardado.");
+        mostrar_notificacion_toast("Aún no existe un archivo guardado de v0.8.");
     }
-}
-
-static bool casilla_es_transitable(int gx, int gy)
-{
-    if (gx < 0 || gx >= MAP_WIDTH || gy < 0 || gy >= MAP_HEIGHT) return false;
-    int tipo = obtener_casilla_mundo(gx, gy);
-    if (tipo >= 0 && tipo < MAX_NODOS && tabla_nodos[tipo].registrado) {
-        return !tabla_nodos[tipo].es_solido;
-    }
-    return false;
 }
 
 static const char *nombre_bloque(int tipo)
@@ -1600,13 +2185,23 @@ static const char *nombre_bloque(int tipo)
 
 static void aplicar_herramienta_mundo(int centro_x, int centro_y, int modo_accion)
 {
+    // Si hace Clic Izquierdo sobre un enemigo, lo ataca con la espada
+    if (modo_accion == 0) {
+        for (int e = 0; e < MAX_ENEMIGOS; e++) {
+            if (lista_enemigos[e].activo &&
+                abs(lista_enemigos[e].gx - centro_x) <= 1 &&
+                abs(lista_enemigos[e].gy - centro_y) <= 1) {
+                ejecutar_ataque_espada_jugador();
+                return;
+            }
+        }
+    }
+
     int r_ini = -(tamano_pincel - 1) / 2;
     int r_fin = tamano_pincel / 2;
     static double t_aviso_sin_stock = 0.0;
     static double t_ultimo_sonido = 0.0;
     bool hubo_cambio = false;
-    int ult_tx = centro_x;
-    int ult_ty = centro_y;
 
     for (int dy = r_ini; dy <= r_fin; dy++) {
         for (int dx = r_ini; dx <= r_fin; dx++) {
@@ -1617,25 +2212,33 @@ static void aplicar_herramienta_mundo(int centro_x, int centro_y, int modo_accio
             int actual = obtener_casilla_mundo(tx, ty);
 
             if (modo_accion == 0) {
-                if (actual != 0 && actual != 2) {
+                if (actual != 0 && actual != 2 && actual != 15 && actual != 18) {
                     int id_recurso = (actual == 11) ? 10 : actual;
                     if (id_recurso > 0 && id_recurso < MAX_NODOS) {
                         inventario[id_recurso]++;
                     }
-                    establecer_casilla_mundo(tx, ty, 0);
+                    TipoBioma b = obtener_bioma_en(tx, ty);
+                    int suelo_base = (b == BIOMA_DESIERTO) ? 6 : ((b == BIOMA_NIEVE) ? 15 : ((b == BIOMA_VOLCAN) ? 18 : 0));
+                    establecer_casilla_mundo(tx, ty, suelo_base);
                     hubo_cambio = true;
-                } else if (actual == 2 && modo_creativo) {
+                } else if ((actual == 2 || actual == 7) && modo_creativo) {
                     establecer_casilla_mundo(tx, ty, 0);
                     hubo_cambio = true;
                 }
             } else {
-                if (actual == bloque_seleccionado) continue;
-                if (tx == jugador_x && ty == jugador_y && tabla_nodos[bloque_seleccionado].es_solido) {
+                // Si hace clic derecho sobre Agua (2) o Lava (7) con un bloque sólido, tiende Puente de Madera (8) automáticamente
+                int bloque_a_poner = bloque_seleccionado;
+                if ((actual == 2 || actual == 7) && tabla_nodos[bloque_seleccionado].es_solido && inventario[8] > 0) {
+                    bloque_a_poner = 8;
+                }
+
+                if (actual == bloque_a_poner) continue;
+                if (tx == jugador_x && ty == jugador_y && tabla_nodos[bloque_a_poner].es_solido) {
                     continue;
                 }
 
                 if (!modo_creativo) {
-                    if (inventario[bloque_seleccionado] <= 0) {
+                    if (inventario[bloque_a_poner] <= 0) {
                         if (GetTime() - t_aviso_sin_stock > 1.2) {
                             reproducir_sonido_motor(SONIDO_ALERTA);
                             mostrar_notificacion_toast("¡Sin stock! Recolecta con Clic Izq o ve a 'Artesanía'.");
@@ -1643,63 +2246,93 @@ static void aplicar_herramienta_mundo(int centro_x, int centro_y, int modo_accio
                         }
                         return;
                     }
-                    inventario[bloque_seleccionado]--;
+                    inventario[bloque_a_poner]--;
                 }
-                establecer_casilla_mundo(tx, ty, bloque_seleccionado);
-                ult_tx = tx;
-                ult_ty = ty;
+                establecer_casilla_mundo(tx, ty, bloque_a_poner);
                 hubo_cambio = true;
+
+                if (bloque_a_poner == 14) {
+                    mostrar_notificacion_toast("💣 ¡TNT activada! Explotará en 3 segundos (o pulsa [E] ya).");
+                } else if (bloque_a_poner == 13) {
+                    mostrar_notificacion_toast("🌱 Semilla plantada: crecerá en 5 segundos (o pulsa [E]).");
+                }
             }
         }
     }
 
-    if (hubo_cambio) {
-        if (GetTime() - t_ultimo_sonido > 0.08) {
-            reproducir_sonido_motor(modo_accion == 0 ? SONIDO_MINAR : SONIDO_CONSTRUIR);
-            t_ultimo_sonido = GetTime();
-        }
-        // Si colocó una Semilla (13) o TNT (14), disparar evento al_colocar (Modo 3) en Latino
-        if (modo_accion == 1 && (bloque_seleccionado == 13 || bloque_seleccionado == 14)) {
-            ultimo_evento_x = ult_tx;
-            ultimo_evento_y = ult_ty;
-            ultimo_evento_id = bloque_seleccionado;
-            ejecutar_script_latino(3, 0, 0);
-        }
+    if (hubo_cambio && (GetTime() - t_ultimo_sonido > 0.08)) {
+        reproducir_sonido_motor(modo_accion == 0 ? SONIDO_MINAR : SONIDO_CONSTRUIR);
+        t_ultimo_sonido = GetTime();
     }
 }
 
-// Dispara el evento al_interactuar (Modo 4 en Latino) sobre Puertas (10/11), Semillas (13) o TNT (14)
+// ============================================================================
+// INTERACCIÓN INSTANTÁNEA CON [E] (PUERTAS, TNT, SEMILLAS Y PUENTES EN C)
+// ============================================================================
+
 static void interactuar_con_entorno(int raton_tx, int raton_ty)
 {
-    for (int dy = -1; dy <= 1; dy++) {
-        for (int dx = -1; dx <= 1; dx++) {
+    // 1. Prioridad: Revisar lo que el usuario está apuntando con el ratón
+    if (raton_tx > 0 && raton_tx < MAP_WIDTH - 1 &&
+        raton_ty > 0 && raton_ty < MAP_HEIGHT - 1) {
+        int tr = obtener_casilla_mundo(raton_tx, raton_ty);
+        if (tr == 10) {
+            establecer_casilla_mundo(raton_tx, raton_ty, 11);
+            reproducir_sonido_motor(SONIDO_PUERTA);
+            mostrar_notificacion_toast("🚪 ¡Puerta abierta [E]!");
+            return;
+        } else if (tr == 11 && (raton_tx != jugador_x || raton_ty != jugador_y)) {
+            establecer_casilla_mundo(raton_tx, raton_ty, 10);
+            reproducir_sonido_motor(SONIDO_PUERTA);
+            mostrar_notificacion_toast("🚪 ¡Puerta cerrada [E]!");
+            return;
+        } else if (tr == 14) {
+            detonar_tnt_en(raton_tx, raton_ty);
+            return;
+        } else if (tr == 13) {
+            establecer_casilla_mundo(raton_tx, raton_ty, 4);
+            reproducir_sonido_motor(SONIDO_CRAFT);
+            mostrar_notificacion_toast("🌳 ¡Semilla fertilizada con [E]! Ha crecido un Árbol.");
+            return;
+        }
+    }
+
+    // 2. Revisar un radio de 2 casillas alrededor del jugador (5x5)
+    for (int dy = -2; dy <= 2; dy++) {
+        for (int dx = -2; dx <= 2; dx++) {
             int gx = jugador_x + dx;
             int gy = jugador_y + dy;
             int t = obtener_casilla_mundo(gx, gy);
-            if (t == 10 || (t == 11 && (dx != 0 || dy != 0)) || t == 13 || t == 14) {
-                ultimo_evento_x = gx;
-                ultimo_evento_y = gy;
-                ultimo_evento_id = t;
-                ejecutar_script_latino(4, 0, 0);
+
+            if (t == 10) {
+                establecer_casilla_mundo(gx, gy, 11);
+                reproducir_sonido_motor(SONIDO_PUERTA);
+                mostrar_notificacion_toast("🚪 ¡Puerta abierta [E]!");
+                return;
+            } else if (t == 11 && (dx != 0 || dy != 0)) {
+                establecer_casilla_mundo(gx, gy, 10);
+                reproducir_sonido_motor(SONIDO_PUERTA);
+                mostrar_notificacion_toast("🚪 ¡Puerta cerrada [E]!");
+                return;
+            } else if (t == 14) {
+                detonar_tnt_en(gx, gy);
+                return;
+            } else if (t == 13) {
+                establecer_casilla_mundo(gx, gy, 4);
+                reproducir_sonido_motor(SONIDO_CRAFT);
+                mostrar_notificacion_toast("🌳 ¡Semilla fertilizada con [E]! Ha crecido un Árbol.");
                 return;
             }
         }
     }
 
-    if (raton_tx > 0 && raton_tx < MAP_WIDTH - 1 &&
-        raton_ty > 0 && raton_ty < MAP_HEIGHT - 1) {
-        int t = obtener_casilla_mundo(raton_tx, raton_ty);
-        if (t == 10 || t == 11 || t == 13 || t == 14) {
-            ultimo_evento_x = raton_tx;
-            ultimo_evento_y = raton_ty;
-            ultimo_evento_id = t;
-            ejecutar_script_latino(4, 0, 0);
-            return;
-        }
+    // 3. Si está cerca de Agua (2) o Lava (7), tiende un Puente de Madera automáticamente
+    if (tender_puente_cercano()) {
+        return;
     }
 
     reproducir_sonido_motor(SONIDO_ALERTA);
-    mostrar_notificacion_toast("Acércate a una Puerta, Semilla o TNT para interactuar con [E].");
+    mostrar_notificacion_toast("Pulsa [E] frente a Puertas, TNT, Semillas o Agua/Lava (para tender Puente).");
 }
 
 static float calcular_oscuridad_ambiental(float h)
@@ -1737,7 +2370,7 @@ int main(void)
 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
 
-    InitWindow(1540, 950, "LatinoVox 2D & LatinoUI v0.7 - Autómatas, Eventos y Editor UTF-8");
+    InitWindow(1560, 960, "LatinoVox 2D & LatinoUI v0.8 - 5 Biomas (1024x1024), Combate y Gólems Ilimitados");
     if (!IsWindowReady()) {
         return 1;
     }
@@ -1749,7 +2382,7 @@ int main(void)
     inicializar_audio_procedural();
 
     agregar_log_consola("=== Consola Interactiva Latino (.lat) en Vivo ===");
-    agregar_log_consola("Usa las flechas Izquierda/Derecha para mover el cursor y pulsa [ENTER].");
+    agregar_log_consola("Escribe comandos en español y pulsa [ENTER], o usa los botones rápidos.");
     cursor_consola_bytes = (int)strlen(entrada_consola);
 
     inicializar_mundo_con_latino(false);
@@ -1758,8 +2391,8 @@ int main(void)
     camara.rotation = 0.0f;
     camara.zoom = 1.35f;
 
-    const int orden_hotbar[12] = { 1, 4, 8, 9, 10, 12, 13, 14, 5, 6, 7, 2 };
-    const char *etiqueta_tecla_hb[12] = { "1", "4", "8", "9", "0", "T", "Y", "U", "5", "6", "7", "2" };
+    const int orden_hotbar[12] = { 8, 9, 10, 12, 13, 14, 1, 4, 5, 6, 19, 7 };
+    const char *etiqueta_tecla_hb[12] = { "8", "9", "0", "T", "Y", "U", "1", "4", "5", "6", "K", "7" };
 
     while (!WindowShouldClose()) {
         int screenWidth = GetScreenWidth();
@@ -1771,6 +2404,12 @@ int main(void)
             tiempo_toast -= dt;
             if (tiempo_toast < 0.0f) tiempo_toast = 0.0f;
         }
+        if (tiempo_onda_explosion > 0.0f) {
+            tiempo_onda_explosion -= dt;
+        }
+        if (tiempo_ataque_espada > 0.0f) {
+            tiempo_ataque_espada -= dt;
+        }
 
         if (ciclo_luz_auto && !modal_activo && !consola_activa) {
             hora_dia += dt * 0.22f;
@@ -1781,7 +2420,7 @@ int main(void)
             }
         }
 
-        // --- TEMPORIZADOR DE CRECIMIENTO DE SEMILLAS Y TICK DEL GÓLEM (MODO 5) ---
+        // --- TEMPORIZADOR DE SEMILLAS Y MECHA AUTOMÁTICA DE DINAMITA TNT ---
         for (int s = 0; s < MAX_SEMILLAS_ACTIVAS; s++) {
             if (lista_semillas[s].activa) {
                 if (obtener_casilla_mundo(lista_semillas[s].gx, lista_semillas[s].gy) != 13) {
@@ -1793,17 +2432,49 @@ int main(void)
                     establecer_casilla_mundo(lista_semillas[s].gx, lista_semillas[s].gy, 4);
                     lista_semillas[s].activa = false;
                     reproducir_sonido_motor(SONIDO_CRAFT);
-                    mostrar_notificacion_toast("🌳 ¡Una Semilla ha madurado y ahora es un Árbol!");
                 }
             }
         }
 
-        temporizador_mundo_tick += dt;
-        if (temporizador_mundo_tick >= 0.45f) {
-            temporizador_mundo_tick = 0.0f;
-            if (golem_tarea > 0 && !modal_activo) {
-                generar_chunk_bajo_demanda(golem_x / CHUNK_SIZE, golem_y / CHUNK_SIZE);
-                ejecutar_script_latino(5, 0, 0);
+        for (int t = 0; t < MAX_TNT_ACTIVAS; t++) {
+            if (lista_tnt[t].activa) {
+                if (obtener_casilla_mundo(lista_tnt[t].gx, lista_tnt[t].gy) != 14) {
+                    lista_tnt[t].activa = false;
+                    continue;
+                }
+                lista_tnt[t].tiempo_restante -= dt;
+                if (lista_tnt[t].tiempo_restante <= 0.0f) {
+                    int bx = lista_tnt[t].gx;
+                    int by = lista_tnt[t].gy;
+                    lista_tnt[t].activa = false;
+                    detonar_tnt_en(bx, by);
+                }
+            }
+        }
+
+        // --- TICK DE IA DE GÓLEMS Y ENEMIGOS (CADA 0.35s EN C) ---
+        temporizador_ia_tick += dt;
+        if (temporizador_ia_tick >= 0.35f) {
+            temporizador_ia_tick = 0.0f;
+            if (!modal_activo) {
+                actualizar_ia_golems_y_enemigos();
+            }
+        }
+
+        // Generación periódica de enemigos si está activo
+        temporizador_spawn_enemigo += dt;
+        if (spawner_enemigos_activo && temporizador_spawn_enemigo >= 9.0f) {
+            temporizador_spawn_enemigo = 0.0f;
+            if (contar_enemigos_activos() < 24) {
+                int ox = ((rand() % 2 == 0) ? 1 : -1) * (10 + (rand() % 6));
+                int oy = ((rand() % 2 == 0) ? 1 : -1) * (10 + (rand() % 6));
+                int ex = jugador_x + ox;
+                int ey = jugador_y + oy;
+                if (casilla_es_transitable(ex, ey)) {
+                    TipoBioma b = obtener_bioma_en(ex, ey);
+                    int t_en = (b == BIOMA_VOLCAN) ? 2 : ((b == BIOMA_DESIERTO || b == BIOMA_NIEVE) ? 1 : 0);
+                    crear_enemigo_en(ex, ey, t_en);
+                }
             }
         }
 
@@ -1911,7 +2582,7 @@ int main(void)
             }
         }
 
-        // --- C. ATAJOS DE SISTEMA ---
+        // --- C. ATAJOS DE SISTEMA, COMBATE [F], GÓLEMS ILIMITADOS [V] Y ACCIÓN [E] ---
         if (!modal_activo && !consola_activa && id_caja_activa == -1) {
             if (IsKeyPressed(KEY_R)) {
                 inicializar_mundo_con_latino(false);
@@ -1919,6 +2590,12 @@ int main(void)
                 mostrar_notificacion_toast("Script recargado manualmente [R]");
             }
             if (IsKeyPressed(KEY_E)) interactuar_con_entorno(raton_tx, raton_ty);
+            if (IsKeyPressed(KEY_F)) ejecutar_ataque_espada_jugador();
+            if (IsKeyPressed(KEY_V)) {
+                crear_nuevo_golem(jugador_x + ultima_dir_x, jugador_y + ultima_dir_y, golem_tarea_global);
+                reproducir_sonido_motor(SONIDO_CRAFT);
+                mostrar_notificacion_toast(TextFormat("🤖 ¡Nuevo Gólem creado [V]! Total activos: %d", contar_golems_activos()));
+            }
             if (IsKeyPressed(KEY_G)) guardar_mundo_disco();
             if (IsKeyPressed(KEY_C)) cargar_mundo_disco();
             if (IsKeyPressed(KEY_B)) mostrar_bordes_chunk = !mostrar_bordes_chunk;
@@ -1957,6 +2634,10 @@ int main(void)
             }
             if (IsKeyPressed(KEY_U) && tabla_nodos[14].registrado) {
                 bloque_seleccionado = 14;
+                reproducir_sonido_motor(SONIDO_CLIC);
+            }
+            if (IsKeyPressed(KEY_K) && tabla_nodos[19].registrado) {
+                bloque_seleccionado = 19;
                 reproducir_sonido_motor(SONIDO_CLIC);
             }
         } else if (IsKeyPressed(KEY_TAB) && !consola_activa) {
@@ -2030,7 +2711,7 @@ int main(void)
                     Rectangle r_tab = {
                         rect_panel_ui.x + 10.0f + (float)t * w_tab,
                         rect_panel_ui.y + (float)alto_titulo_panel,
-                        w_tab - 4.0f,
+                        w_tab - 3.0f,
                         (float)alto_barra_tabs
                     };
                     if (CheckCollisionPointRec(pos_raton, r_tab)) {
@@ -2084,7 +2765,6 @@ int main(void)
                         break;
                     }
                 } else if (w->tipo == WIDGET_CAJA_TEXTO) {
-                    // Si está activa, comprobar clic en la barra rápida de tildes y ñ
                     bool clic_en_chip = false;
                     if (tiene_foco_caja && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                         float w_ch = (rect_item.width - 18.0f) / 10.0f;
@@ -2145,29 +2825,29 @@ int main(void)
         if (!modal_activo && !consola_activa && id_caja_activa == -1) {
             if (modo_un_toque) {
                 if (IsKeyPressed(KEY_W) || IsKeyPressed(KEY_UP)) {
-                    dir_mov_x = 0; dir_mov_y = -1; temporizador_paso = 1.0f;
+                    dir_mov_x = 0; dir_mov_y = -1; ultima_dir_x = 0; ultima_dir_y = -1; temporizador_paso = 1.0f;
                 } else if (IsKeyPressed(KEY_S) || IsKeyPressed(KEY_DOWN)) {
-                    dir_mov_x = 0; dir_mov_y = 1;  temporizador_paso = 1.0f;
+                    dir_mov_x = 0; dir_mov_y = 1;  ultima_dir_x = 0; ultima_dir_y = 1;  temporizador_paso = 1.0f;
                 } else if (IsKeyPressed(KEY_A) || IsKeyPressed(KEY_LEFT)) {
-                    dir_mov_x = -1; dir_mov_y = 0; temporizador_paso = 1.0f;
+                    dir_mov_x = -1; dir_mov_y = 0; ultima_dir_x = -1; ultima_dir_y = 0; temporizador_paso = 1.0f;
                 } else if (IsKeyPressed(KEY_D) || IsKeyPressed(KEY_RIGHT)) {
-                    dir_mov_x = 1; dir_mov_y = 0;  temporizador_paso = 1.0f;
+                    dir_mov_x = 1; dir_mov_y = 0;  ultima_dir_x = 1; ultima_dir_y = 0;  temporizador_paso = 1.0f;
                 } else if (IsKeyPressed(KEY_SPACE)) {
                     dir_mov_x = 0; dir_mov_y = 0;
                 }
             } else {
                 dir_mov_x = 0; dir_mov_y = 0;
-                if (IsKeyDown(KEY_W) || IsKeyDown(KEY_UP))         dir_mov_y = -1;
-                else if (IsKeyDown(KEY_S) || IsKeyDown(KEY_DOWN))  dir_mov_y = 1;
-                else if (IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT))  dir_mov_x = -1;
-                else if (IsKeyDown(KEY_D) || IsKeyDown(KEY_RIGHT)) dir_mov_x = 1;
+                if (IsKeyDown(KEY_W) || IsKeyDown(KEY_UP))         { dir_mov_y = -1; ultima_dir_x = 0; ultima_dir_y = -1; }
+                else if (IsKeyDown(KEY_S) || IsKeyDown(KEY_DOWN))  { dir_mov_y = 1;  ultima_dir_x = 0; ultima_dir_y = 1; }
+                else if (IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT))  { dir_mov_x = -1; ultima_dir_x = -1; ultima_dir_y = 0; }
+                else if (IsKeyDown(KEY_D) || IsKeyDown(KEY_RIGHT)) { dir_mov_x = 1;  ultima_dir_x = 1; ultima_dir_y = 0; }
             }
         } else {
             dir_mov_x = 0;
             dir_mov_y = 0;
         }
 
-        float intervalo_paso = (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) ? 0.055f : 0.11f;
+        float intervalo_paso = (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) ? 0.055f : 0.105f;
 
         if (dir_mov_x != 0 || dir_mov_y != 0) {
             temporizador_paso += dt;
@@ -2230,8 +2910,15 @@ int main(void)
         int total_luces = 0;
 
         if (oscuridad > 0.01f) {
-            luces[total_luces++] = (FuenteLuz){ jugador_x, jugador_y, 4 };
-            luces[total_luces++] = (FuenteLuz){ golem_x, golem_y, 4 }; // El Gólem también ilumina
+            luces[total_luces++] = (FuenteLuz){ jugador_x, jugador_y, 5 };
+
+            for (int g = 0; g < MAX_GOLEMS && total_luces < MAX_LUCES_VISIBLES; g++) {
+                if (lista_golems[g].activo &&
+                    lista_golems[g].gx >= min_x - 4 && lista_golems[g].gx <= max_x + 4 &&
+                    lista_golems[g].gy >= min_y - 4 && lista_golems[g].gy <= max_y + 4) {
+                    luces[total_luces++] = (FuenteLuz){ lista_golems[g].gx, lista_golems[g].gy, 3 };
+                }
+            }
 
             int l_min_x = (min_x - 7 < 0) ? 0 : min_x - 7;
             int l_min_y = (min_y - 7 < 0) ? 0 : min_y - 7;
@@ -2282,20 +2969,24 @@ int main(void)
                 }
 
                 int tipo = obtener_casilla_mundo(gx, gy);
-                Color color_pasto = aplicar_iluminacion_casilla(tabla_nodos[0].color, oscuridad, luz_local);
-                Color color_nodo = color_pasto;
+                TipoBioma b_tile = obtener_bioma_en(gx, gy);
+                int id_suelo = (b_tile == BIOMA_DESIERTO) ? 6 : ((b_tile == BIOMA_NIEVE) ? 15 : ((b_tile == BIOMA_VOLCAN) ? 18 : 0));
+                Color color_suelo = aplicar_iluminacion_casilla(tabla_nodos[id_suelo].color, oscuridad, luz_local);
+                Color color_nodo = color_suelo;
                 if (tipo >= 0 && tipo < MAX_NODOS && tabla_nodos[tipo].registrado) {
                     color_nodo = aplicar_iluminacion_casilla(tabla_nodos[tipo].color, oscuridad, luz_local);
                 }
 
                 if (tipo == 3 || tipo == 4) {
-                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_pasto);
+                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_suelo);
                     DrawRectangle(px + 10, py + 10, TILE_SIZE - 20, TILE_SIZE - 20, color_nodo);
                 } else if (tipo == 8) {
+                    // Puente / Tablones de Madera con barandillas laterales
                     DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_nodo);
-                    Color c_veta = aplicar_iluminacion_casilla((Color){ 135, 90, 45, 255 }, oscuridad, luz_local);
+                    Color c_veta = aplicar_iluminacion_casilla((Color){ 120, 75, 35, 255 }, oscuridad, luz_local);
                     DrawLine(px, py + 16, px + TILE_SIZE, py + 16, c_veta);
                     DrawLine(px, py + 32, px + TILE_SIZE, py + 32, c_veta);
+                    DrawRectangleLines(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4, c_veta);
                 } else if (tipo == 9) {
                     DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_nodo);
                     Color c_junta = aplicar_iluminacion_casilla((Color){ 210, 195, 185, 255 }, oscuridad, luz_local);
@@ -2303,36 +2994,62 @@ int main(void)
                     DrawLine(px + 24, py, px + 24, py + 24, c_junta);
                     DrawLine(px + 12, py + 24, px + 12, py + TILE_SIZE, c_junta);
                 } else if (tipo == 10) {
-                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_pasto);
+                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_suelo);
                     DrawRectangle(px + 4, py + 14, TILE_SIZE - 8, TILE_SIZE - 28, color_nodo);
                     DrawRectangleLines(px + 4, py + 14, TILE_SIZE - 8, TILE_SIZE - 28, BLACK);
-                    DrawCircle(px + TILE_SIZE - 12, py + TILE_SIZE / 2, 3.0f, GOLD);
+                    DrawCircle(px + TILE_SIZE - 12, py + TILE_SIZE / 2, 3.5f, GOLD);
                 } else if (tipo == 11) {
-                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_pasto);
+                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_suelo);
                     DrawRectangle(px + 4, py + 4, 12, TILE_SIZE - 8, color_nodo);
                     DrawRectangleLines(px + 4, py + 4, 12, TILE_SIZE - 8, GOLD);
                 } else if (tipo == 12) {
-                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_pasto);
+                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_suelo);
                     DrawRectangle(px + 21, py + 22, 6, 16, BROWN);
                     float pulso = 7.0f + sinf((float)GetTime() * 8.0f + (float)(gx + gy)) * 1.5f;
                     DrawCircle(px + 24, py + 18, pulso, (Color){ 255, 140, 20, 220 });
                     DrawCircle(px + 24, py + 18, pulso * 0.55f, YELLOW);
                 } else if (tipo == 13) {
-                    // Semilla / Brote de árbol en crecimiento
-                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_pasto);
+                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_suelo);
                     DrawRectangle(px + 22, py + 24, 4, 14, BROWN);
                     DrawCircle(px + 20, py + 22, 6.0f, color_nodo);
                     DrawCircle(px + 28, py + 22, 6.0f, LIME);
                 } else if (tipo == 14) {
-                    // Dinamita TNT
-                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_pasto);
-                    DrawRectangle(px + 8, py + 8, TILE_SIZE - 16, TILE_SIZE - 16, color_nodo);
-                    DrawRectangle(px + 8, py + 20, TILE_SIZE - 16, 8, RAYWHITE);
-                    DrawCircle(px + 24, py + 6, 3.5f, ((int)(GetTime() * 6.0) % 2 == 0) ? YELLOW : ORANGE);
+                    // Dinamita TNT con parpadeo y cuenta regresiva
+                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_suelo);
+                    bool flash = (((int)(GetTime() * 8.0)) % 2 == 0);
+                    DrawRectangle(px + 6, py + 6, TILE_SIZE - 12, TILE_SIZE - 12, flash ? RED : WHITE);
+                    DrawRectangle(px + 6, py + 19, TILE_SIZE - 12, 10, BLACK);
+                    dibujar_texto_ui("TNT", px + 10, py + 16, 14, YELLOW);
+                } else if (tipo == 16) {
+                    // Cactus del desierto
+                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_suelo);
+                    DrawRectangle(px + 18, py + 8, 12, TILE_SIZE - 14, color_nodo);
+                    DrawRectangle(px + 10, py + 16, 8, 6, color_nodo);
+                    DrawRectangle(px + 30, py + 20, 8, 6, color_nodo);
+                } else if (tipo == 19) {
+                    // Cristal Rubí Luminoso
+                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_suelo);
+                    DrawCircle(px + 24, py + 24, 14.0f, color_nodo);
+                    DrawCircle(px + 24, py + 24, 7.0f, PINK);
                 } else {
                     DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_nodo);
                 }
             }
+        }
+
+        // Onda expansiva visual cuando explota una TNT
+        if (tiempo_onda_explosion > 0.0f) {
+            float radio_px = (0.45f - tiempo_onda_explosion) * 420.0f;
+            DrawCircleLines(
+                explosion_vis_x * TILE_SIZE + TILE_SIZE / 2,
+                explosion_vis_y * TILE_SIZE + TILE_SIZE / 2,
+                radio_px, ORANGE
+            );
+            DrawCircleLines(
+                explosion_vis_x * TILE_SIZE + TILE_SIZE / 2,
+                explosion_vis_y * TILE_SIZE + TILE_SIZE / 2,
+                radio_px * 0.7f, YELLOW
+            );
         }
 
         if (mostrar_bordes_chunk) {
@@ -2360,31 +3077,68 @@ int main(void)
             DrawRectangleLinesEx((Rectangle){ (float)px_ini, (float)py_ini, (float)lado_px, (float)lado_px }, 2.5f, YELLOW);
         }
 
-        // Dibujar el Autómata Gólem (Robot Constructor Cian)
-        int gpx = golem_x * TILE_SIZE;
-        int gpy = golem_y * TILE_SIZE;
-        DrawRectangle(gpx + 8, gpy + 10, TILE_SIZE - 16, TILE_SIZE - 14, (Color){ 40, 175, 225, 255 });
-        DrawRectangleLines(gpx + 8, gpy + 10, TILE_SIZE - 16, TILE_SIZE - 14, WHITE);
-        DrawRectangle(gpx + 13, gpy + 16, TILE_SIZE - 26, 8, YELLOW); // Visor LED
-        DrawLine(gpx + TILE_SIZE / 2, gpy + 2, gpx + TILE_SIZE / 2, gpy + 10, SKYBLUE);
-        DrawCircle(gpx + TILE_SIZE / 2, gpy + 3, 3.5f, (golem_tarea > 0) ? GREEN : RED);
+        // Dibujar todos los Gólems visibles en pantalla
+        for (int i = 0; i < MAX_GOLEMS; i++) {
+            if (!lista_golems[i].activo) continue;
+            int gx = lista_golems[i].gx;
+            int gy = lista_golems[i].gy;
+            if (gx < min_x || gx > max_x || gy < min_y || gy > max_y) continue;
 
-        // Dibujar Jugador
-        DrawCircle(
-            jugador_x * TILE_SIZE + TILE_SIZE / 2,
-            jugador_y * TILE_SIZE + TILE_SIZE / 2,
-            TILE_SIZE * 0.35f,
-            RED
-        );
+            int gpx = gx * TILE_SIZE;
+            int gpy = gy * TILE_SIZE;
+            Color c_chasis = (lista_golems[i].tarea == 3) ? (Color){ 230, 155, 40, 255 } :
+                             ((lista_golems[i].tarea == 2) ? (Color){ 60, 190, 95, 255 } : (Color){ 40, 175, 225, 255 });
+            DrawRectangle(gpx + 8, gpy + 10, TILE_SIZE - 16, TILE_SIZE - 14, c_chasis);
+            DrawRectangleLines(gpx + 8, gpy + 10, TILE_SIZE - 16, TILE_SIZE - 14, WHITE);
+            DrawRectangle(gpx + 13, gpy + 16, TILE_SIZE - 26, 8, YELLOW);
+            DrawCircle(gpx + TILE_SIZE / 2, gpy + 4, 3.5f, (lista_golems[i].tarea > 0) ? LIME : RED);
+        }
+
+        // Dibujar todos los Enemigos visibles con barra de vida
+        for (int e = 0; e < MAX_ENEMIGOS; e++) {
+            if (!lista_enemigos[e].activo) continue;
+            int ex = lista_enemigos[e].gx;
+            int ey = lista_enemigos[e].gy;
+            if (ex < min_x || ex > max_x || ey < min_y || ey > max_y) continue;
+
+            int epx = ex * TILE_SIZE;
+            int epy = ey * TILE_SIZE;
+            Color c_enem = (lista_enemigos[e].tipo == 2) ? (Color){ 235, 65, 30, 255 } :
+                           ((lista_enemigos[e].tipo == 1) ? (Color){ 220, 220, 230, 255 } : (Color){ 75, 215, 65, 255 });
+
+            DrawCircle(epx + TILE_SIZE / 2, epy + TILE_SIZE / 2 + 2, TILE_SIZE * 0.36f, c_enem);
+            DrawCircleLines(epx + TILE_SIZE / 2, epy + TILE_SIZE / 2 + 2, TILE_SIZE * 0.36f, BLACK);
+            // Ojos hostiles
+            DrawCircle(epx + 17, epy + 20, 4.0f, RED);
+            DrawCircle(epx + 31, epy + 20, 4.0f, RED);
+
+            // Barra de salud sobre el enemigo
+            float ratio_hp = (float)lista_enemigos[e].hp / (float)lista_enemigos[e].max_hp;
+            DrawRectangle(epx + 6, epy + 2, TILE_SIZE - 12, 6, BLACK);
+            DrawRectangle(epx + 6, epy + 2, (int)((TILE_SIZE - 12) * ratio_hp), 6, RED);
+        }
+
+        // Dibujar Jugador y Efecto de Ataque de Espada [F]
+        int jpx = jugador_x * TILE_SIZE + TILE_SIZE / 2;
+        int jpy = jugador_y * TILE_SIZE + TILE_SIZE / 2;
+
+        if (tiempo_ataque_espada > 0.0f) {
+            DrawCircleLines(jpx, jpy, TILE_SIZE * 1.65f, SKYBLUE);
+            DrawCircleLines(jpx, jpy, TILE_SIZE * 1.40f, GOLD);
+            DrawCircle(jpx, jpy, TILE_SIZE * 1.50f, (Color){ 100, 220, 255, 65 });
+        }
+
+        DrawCircle(jpx, jpy, TILE_SIZE * 0.36f, RED);
+        DrawCircleLines(jpx, jpy, TILE_SIZE * 0.36f, WHITE);
 
         EndMode2D();
 
-        // --- J. HUD SUPERIOR CON AUTOAJUSTE DE LÍNEA ---
+        // --- J. HUD SUPERIOR CON BIOMA ACTUAL, SALUD, GÓLEMS Y ENEMIGOS ---
         int j_cx = jugador_x / CHUNK_SIZE;
         int j_cy = jugador_y / CHUNK_SIZE;
         int hora_ent = (int)hora_dia;
         int min_ent = (int)((hora_dia - (float)hora_ent) * 60.0f);
-        const char *nombres_tarea[4] = { "Espera", "Siguiendo", "Leñador/Minero", "Constructor" };
+        TipoBioma bioma_actual = obtener_bioma_en(jugador_x, jugador_y);
 
         DrawRectangle(0, 0, screenWidth, alto_hud, tema.fondo_panel);
         DrawLine(0, alto_hud, screenWidth, alto_hud, tema.borde_panel);
@@ -2395,28 +3149,28 @@ int main(void)
 
         dibujar_texto_ajustado(
             (id_caja_activa != -1 || consola_activa)
-                ? "MODO EDICIÓN UTF-8: Usa Flechas [Izq/Der] para mover el cursor | [ENTER] Aceptar | Barra inferior: áéíóúñ"
-                : "WASD: Caminar | Clic Izq: Minar | Clic Der: Construir | [E] Puerta/TNT/Semilla | [F3] Consola .lat",
+                ? "MODO EDICIÓN UTF-8: Flechas [Izq/Der] mueven cursor | [ENTER] Aceptar | Barra inferior: áéíóúñ"
+                : "WASD: Caminar | [F] Espada | [V] +1 Gólem | [E] Puerta/TNT/Puente | Clic Izq: Minar/Atacar | Clic Der: Poner",
             r_hud1, font_hud, false, (id_caja_activa != -1 || consola_activa) ? GOLD : tema.texto_normal
         );
 
         dibujar_texto_ajustado(
-            TextFormat("FPS: %d | Pos: (%d,%d) | Gólem: (%d,%d) [%s] | Reloj: %02d:%02d | VM: %.2f ms",
-                       GetFPS(), jugador_x, jugador_y, golem_x, golem_y,
-                       nombres_tarea[golem_tarea % 4], hora_ent, min_ent, ultimo_tiempo_vm_ms),
+            TextFormat("FPS: %d | Pos: (%d,%d) Chunk:(%d,%d) | Bioma: [%s] | Vida: %d/%d HP | Gólems: %d | Enemigos: %d",
+                       GetFPS(), jugador_x, jugador_y, j_cx, j_cy,
+                       nombre_bioma(bioma_actual), jugador_hp, jugador_max_hp,
+                       contar_golems_activos(), contar_enemigos_activos()),
             r_hud2, font_hud, false, (tema_actual == 1) ? DARKGREEN : GREEN
         );
 
         dibujar_texto_ajustado(
-            TextFormat("Mano: [%s] Stock: %s | Audio: %s | %s",
+            TextFormat("Mano: [%s] Stock: %s | Reloj: %02d:%02d | Abatidos: %d | %s",
                        nombre_bloque(bloque_seleccionado),
                        modo_creativo ? "Infinito" : TextFormat("x%d", inventario[bloque_seleccionado]),
-                       audio_activo ? "ON" : "MUTE",
-                       estado_sistema),
+                       hora_ent, min_ent, enemigos_derrotados, estado_sistema),
             r_hud3, font_hud, false, tema.texto_etiqueta
         );
 
-        // --- K. MINIMAPA 2D EN VIVO ---
+        // --- K. MINIMAPA 2D CENTRADO EN EL JUGADOR (RADAR DE BIOMAS, GÓLEMS Y ENEMIGOS) ---
         if (mostrar_minimapa && !consola_activa) {
             int map_px = 180;
             int x_mm = 16;
@@ -2424,30 +3178,46 @@ int main(void)
 
             DrawRectangle(x_mm - 4, y_mm - 28, map_px + 8, map_px + 32, tema.fondo_panel);
             DrawRectangleLines(x_mm - 4, y_mm - 28, map_px + 8, map_px + 32, tema.borde_panel);
-            dibujar_texto_ui("Minimapa 2D", x_mm + 6, y_mm - 24, 17, tema.texto_titulo);
+            dibujar_texto_ui(nombre_bioma(bioma_actual), x_mm + 6, y_mm - 24, 16, tema.texto_titulo);
 
+            int radio_radar = 60;
             for (int my = 0; my < 60; my++) {
                 for (int mx = 0; mx < 60; mx++) {
-                    int gx = (mx * MAP_WIDTH) / 60;
-                    int gy = (my * MAP_HEIGHT) / 60;
-                    int cx = gx / CHUNK_SIZE;
-                    int cy = gy / CHUNK_SIZE;
-                    Color cm = (Color){ 30, 35, 45, 255 };
-                    if (mundo[cy][cx].generado) {
-                        int t = obtener_casilla_mundo(gx, gy);
-                        cm = tabla_nodos[t].color;
+                    int gx = jugador_x + (mx - 30) * 2;
+                    int gy = jugador_y + (my - 30) * 2;
+                    Color cm = (Color){ 25, 30, 40, 255 };
+                    if (gx >= 0 && gx < MAP_WIDTH && gy >= 0 && gy < MAP_HEIGHT) {
+                        int cx = gx / CHUNK_SIZE;
+                        int cy = gy / CHUNK_SIZE;
+                        if (mundo[cy][cx].generado) {
+                            int t = obtener_casilla_mundo(gx, gy);
+                            cm = tabla_nodos[t].color;
+                        }
                     }
                     DrawRectangle(x_mm + mx * 3, y_mm + my * 3, 3, 3, cm);
                 }
             }
-            int g_mx = x_mm + (golem_x * map_px) / MAP_WIDTH;
-            int g_my = y_mm + (golem_y * map_px) / MAP_HEIGHT;
-            DrawCircle(g_mx, g_my, 3.5f, SKYBLUE);
 
-            int j_mx = x_mm + (jugador_x * map_px) / MAP_WIDTH;
-            int j_my = y_mm + (jugador_y * map_px) / MAP_HEIGHT;
-            DrawCircle(j_mx, j_my, 4.0f, RED);
-            DrawCircleLines(j_mx, j_my, 5.0f, WHITE);
+            // Dibujar Gólems (Cian) y Enemigos (Morado/Rojo) en el radar
+            for (int g = 0; g < MAX_GOLEMS; g++) {
+                if (!lista_golems[g].activo) continue;
+                int dx = (lista_golems[g].gx - jugador_x) / 2 + 30;
+                int dy = (lista_golems[g].gy - jugador_y) / 2 + 30;
+                if (dx >= 0 && dx < radio_radar && dy >= 0 && dy < radio_radar) {
+                    DrawRectangle(x_mm + dx * 3, y_mm + dy * 3, 4, 4, SKYBLUE);
+                }
+            }
+            for (int e = 0; e < MAX_ENEMIGOS; e++) {
+                if (!lista_enemigos[e].activo) continue;
+                int dx = (lista_enemigos[e].gx - jugador_x) / 2 + 30;
+                int dy = (lista_enemigos[e].gy - jugador_y) / 2 + 30;
+                if (dx >= 0 && dx < radio_radar && dy >= 0 && dy < radio_radar) {
+                    DrawRectangle(x_mm + dx * 3, y_mm + dy * 3, 4, 4, MAGENTA);
+                }
+            }
+
+            DrawCircle(x_mm + 90, y_mm + 90, 4.0f, RED);
+            DrawCircleLines(x_mm + 90, y_mm + 90, 5.0f, WHITE);
         }
 
         // --- L. BARRA RÁPIDA DE HERRAMIENTAS (HOTBAR) ---
@@ -2553,7 +3323,7 @@ int main(void)
                     DrawRectangleRec(rect_item, tema.fondo_widget);
                     DrawRectangleLinesEx(rect_item, 1.5f, tema.borde_panel);
 
-                    const int ids_mostrar[9] = { 4, 1, 6, 8, 9, 10, 12, 13, 14 };
+                    const int ids_mostrar[9] = { 4, 1, 6, 8, 9, 10, 12, 14, 19 };
                     int col_w = (int)(rect_item.width - 16.0f) / 3;
                     int fila_h = font_w + 14;
 
@@ -2608,7 +3378,6 @@ int main(void)
                         tiene_foco_caja ? GOLD : tema.texto_normal
                     );
 
-                    // Barra rápida de tildes y ñ cuando la caja tiene el foco
                     if (tiene_foco_caja) {
                         float w_ch = (rect_item.width - 18.0f) / 10.0f;
                         float y_ch = rect_item.y + (float)(font_w * 2) + 26.0f;
@@ -2683,30 +3452,30 @@ int main(void)
             EndScissorMode();
         }
 
-        // --- N. CONSOLA .LAT INTERACTIVA IN-GAME [F3] CON BARRA UTF-8 Y CURSOR ---
+        // --- N. CONSOLA .LAT INTERACTIVA IN-GAME [F3] ---
         if (consola_activa) {
             DrawRectangleRec(rect_consola, (Color){ 10, 14, 22, 246 });
             DrawRectangleLinesEx(rect_consola, 2.5f, GOLD);
 
             Rectangle r_tit_con = { rect_consola.x + 12.0f, rect_consola.y + 6.0f, rect_consola.width - 24.0f, (float)font_hud + 8.0f };
             dibujar_texto_ajustado(
-                "Consola .lat en Vivo (Flechas [Izq/Der] mueven el cursor | [ENTER] Ejecutar | [F3] Cerrar)",
+                "Consola .lat en Vivo (Flechas [Izq/Der] mueven cursor | [ENTER] Ejecutar | [F3] Cerrar)",
                 r_tit_con, font_hud - 2, false, GOLD
             );
             DrawLine((int)rect_consola.x + 12, (int)rect_consola.y + font_hud + 16,
                      (int)(rect_consola.x + rect_consola.width - 12), (int)rect_consola.y + font_hud + 16, SKYBLUE);
 
             const char *chips_txt[4] = {
-                "1: Mensaje con ñ/tildes",
-                "2: Llamar al Gólem",
-                "3: Gólem Leñador",
-                "4: +10 Semillas y TNT"
+                "1: +10 Gólems Ingenieros",
+                "2: Oleada 8 Enemigos",
+                "3: Tender Puente",
+                "4: Ir al Volcán"
             };
             const char *chips_cmd[4] = {
-                "motor.notificar(\"¡Ejecución en español con ñ y áéíóú!\")",
-                "motor.golem_colocar(motor.jugador_x() + 1, motor.jugador_y())",
-                "motor.golem_fijar_tarea(2)",
-                "motor.inv_agregar(13, 10) motor.inv_agregar(14, 10)"
+                "i=0 mientras(i<10) motor.golem_crear(motor.jugador_x()+i-4, motor.jugador_y()+1, 3) i=i+1 fin",
+                "motor.enemigo_oleada(8)",
+                "motor.construir_puente()",
+                "motor.colocar_jugador(280, 512)"
             };
 
             float w_chip = (rect_consola.width - 36.0f) / 4.0f;
@@ -2725,7 +3494,6 @@ int main(void)
                 }
             }
 
-            // Barra de inserción rápida de caracteres en español en la consola
             float w_ac = (rect_consola.width - 42.0f) / 10.0f;
             float y_ac = rect_consola.y + rect_consola.height - (float)(font_hud * 2) - 42.0f;
             for (int c = 0; c < 10; c++) {
@@ -2786,7 +3554,7 @@ int main(void)
             dibujar_texto_ajustado(texto_toast, r_toast, font_hud - 1, true, (Color){ 255, 255, 255, opacidad });
         }
 
-        // --- P. TOOLTIP UX CON SALTO DE LÍNEA AUTOMÁTICO ---
+        // --- P. TOOLTIP UX ---
         if (!modal_activo && tooltip_activo != NULL) {
             int f_tip = font_hud - 4;
             if (f_tip < 14) f_tip = 14;

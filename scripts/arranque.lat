@@ -2,47 +2,55 @@ semilla = motor.semilla()
 modo = motor.modo_carga()
 
 // ============================================================================
-// MODO 0: REGISTRO DE NODOS, AUTÓMATA GÓLEM Y FRONTEND UTF-8 (5 PESTAÑAS)
+// MODO 0: REGISTRO DE 20 NODOS, BIOMAS, EJÉRCITO DE GÓLEMS Y FRONTEND (v0.8)
 // ============================================================================
 si (modo == 0)
     escribir("==================================================")
-    escribir("[Latino-Sandbox] Iniciando LatinoVox & UI v0.7...")
+    escribir("[Latino-Sandbox] Iniciando LatinoVox & UI v0.8...")
     escribir("==================================================")
 
-    // 1. Registro dinámico de bloques: (id, nombre, R, G, B, es_solido)
+    // 1. Registro dinámico de bloques (IDs 0 al 19)
     motor.registrar_nodo(0,  "Pasto",          175, 215, 155, 0)
     motor.registrar_nodo(1,  "Piedra",         105, 110, 120, 1)
-    motor.registrar_nodo(2,  "Agua",            65, 155, 225, 1)
+    motor.registrar_nodo(2,  "Agua",            55, 145, 220, 1)
     motor.registrar_nodo(3,  "Cartel",         145,  95,  50, 0)
     motor.registrar_nodo(4,  "Árbol",           35, 115,  50, 1)
     motor.registrar_nodo(5,  "Camino",         210, 180, 140, 0)
     motor.registrar_nodo(6,  "Arena",          238, 222, 155, 0)
     motor.registrar_nodo(7,  "Lava",           235,  75,  30, 1)
-    motor.registrar_nodo(8,  "Madera",         170, 120,  70, 0)
+    motor.registrar_nodo(8,  "Puente Madera",  170, 120,  70, 0)
     motor.registrar_nodo(9,  "Ladrillo",       165,  65,  55, 1)
     motor.registrar_nodo(10, "Puerta Cerrada", 125,  75,  35, 1)
     motor.registrar_nodo(11, "Puerta Abierta", 125,  75,  35, 0)
     motor.registrar_nodo(12, "Antorcha",       255, 200,  50, 0)
     motor.registrar_nodo(13, "Semilla",         95, 195,  65, 0)
     motor.registrar_nodo(14, "Dinamita TNT",   220,  40,  40, 1)
+    motor.registrar_nodo(15, "Nieve",          235, 242, 250, 0)
+    motor.registrar_nodo(16, "Cactus",          50, 160,  75, 1)
+    motor.registrar_nodo(17, "Hielo",          145, 210, 245, 0)
+    motor.registrar_nodo(18, "Basalto",         55,  52,  62, 0)
+    motor.registrar_nodo(19, "Cristal Rubí",   230,  45, 135, 1)
 
-    // 2. Bloques emisores de luz nocturna: (id, radio_casillas)
+    // 2. Bloques emisores de luz nocturna
     motor.nodo_luz(7,  4)
     motor.nodo_luz(12, 7)
-    motor.nodo_luz(14, 3)
+    motor.nodo_luz(14, 4)
+    motor.nodo_luz(19, 5)
 
     // 3. Dotación inicial de recursos en el inventario
-    motor.inv_agregar(1,  10)
-    motor.inv_agregar(4,   6)
-    motor.inv_agregar(5,  15)
-    motor.inv_agregar(6,   8)
-    motor.inv_agregar(8,   8)
-    motor.inv_agregar(10,  2)
-    motor.inv_agregar(12,  6)
-    motor.inv_agregar(13,  8)
-    motor.inv_agregar(14,  4)
+    motor.inv_agregar(1,  15)
+    motor.inv_agregar(4,  10)
+    motor.inv_agregar(5,  20)
+    motor.inv_agregar(6,  10)
+    motor.inv_agregar(8,  25)
+    motor.inv_agregar(9,  15)
+    motor.inv_agregar(10,  4)
+    motor.inv_agregar(12, 10)
+    motor.inv_agregar(13, 10)
+    motor.inv_agregar(14, 10)
+    motor.inv_agregar(19,  5)
 
-    motor.ui_titulo("LatinoUI Studio v0.7")
+    motor.ui_titulo("LatinoUI Studio v0.8")
 
     // ------------------------------------------------------------------------
     // PESTAÑA 1: CONSTRUIR
@@ -52,22 +60,22 @@ si (modo == 0)
     motor.ui_etiqueta("-- Herramienta y Pincel --")
     motor.ui_interruptor(304, "Modo Creativo (Infinito)", 0)
     motor.ui_deslizador(300, "Tamaño de Brocha", 1, 5, 1)
+    motor.ui_boton(25, "Tender Puente Aquí [Tecla E]", 170, 120, 70)
+    motor.ui_ayuda(25, "Construye un puente de madera de 3x3 sobre el agua o lava cercana.")
 
     motor.ui_etiqueta("-- Paleta de Bloques --")
-    motor.ui_boton(1,  "1: Piedra Sólida",     105, 110, 120)
-    motor.ui_boton(4,  "4: Tronco de Árbol",    35, 115,  50)
-    motor.ui_boton(5,  "5: Camino de Tierra",  190, 155, 110)
-    motor.ui_boton(6,  "6: Arena de Playa",    215, 195, 120)
-    motor.ui_boton(8,  "8: Tablones Madera",   170, 120,  70)
+    motor.ui_boton(8,  "8: Puente / Madera",   170, 120,  70)
     motor.ui_boton(9,  "9: Muro de Ladrillo",  165,  65,  55)
     motor.ui_boton(10, "0: Puerta [Tecla E]",  125,  75,  35)
     motor.ui_boton(12, "T: Antorcha de Luz",   215, 155,  20)
     motor.ui_boton(13, "Y: Semilla (Crece)",    75, 165,  50)
     motor.ui_boton(14, "U: Dinamita TNT [E]",  205,  40,  40)
+    motor.ui_boton(1,  "1: Piedra Sólida",     105, 110, 120)
+    motor.ui_boton(5,  "5: Camino de Tierra",  190, 155, 110)
+    motor.ui_boton(19, "Cristal Rubí (Luz)",   200,  40, 120)
 
-    motor.ui_etiqueta("-- Carteles (Navega con Flechas) --")
-    motor.ui_caja_texto(100, "Texto del Cartel:", "¡Cabaña de Mario con ñ y áéíóú!")
-    motor.ui_ayuda(100, "Usa las flechas Izquierda/Derecha para mover el cursor y editar el texto.")
+    motor.ui_etiqueta("-- Carteles y Fortaleza --")
+    motor.ui_caja_texto(100, "Texto del Cartel:", "¡Fortaleza de Mario en Español!")
     motor.ui_boton(15, "Instalar Cartel Aquí", 145,  95,  50)
     motor.ui_boton(20, "Construir Cabaña 5x5", 140,  70, 175)
 
@@ -80,42 +88,50 @@ si (modo == 0)
     motor.ui_resumen_inv()
 
     motor.ui_etiqueta("-- Recetas de Fabricación --")
-    motor.ui_boton(70, "+4 Madera (Usa 1 Árbol)",           170, 120,  70)
+    motor.ui_boton(70, "+6 Puentes Madera (1 Árbol)",       170, 120,  70)
     motor.ui_boton(71, "+4 Antorchas (1 Árbol + 1 Piedra)", 210, 150,  25)
     motor.ui_boton(72, "+4 Ladrillos (2 Piedra + 1 Arena)", 165,  65,  55)
-    motor.ui_boton(73, "+1 Puerta (Usa 2 Madera)",          125,  75,  35)
-    motor.ui_boton(76, "+3 Semillas (Usa 1 Árbol)",          75, 165,  50)
-    motor.ui_boton(77, "+2 Dinamita TNT (1 Arena+1 Piedra)",205,  40,  40)
-    motor.ui_boton(75, "Kit de Suministros (+10 Todo)",      45, 140,  95)
+    motor.ui_boton(73, "+2 Puertas (Usa 2 Madera)",         125,  75,  35)
+    motor.ui_boton(76, "+4 Semillas (Usa 1 Árbol)",          75, 165,  50)
+    motor.ui_boton(77, "+3 Dinamita TNT (1 Arena+1 Piedra)",205,  40,  40)
+    motor.ui_boton(78, "Poción Curativa (+50 Vida: 1 Cristal)", 200, 40, 95)
+    motor.ui_boton(75, "Kit de Suministros (+20 Todo)",      45, 140,  95)
 
     // ------------------------------------------------------------------------
-    // PESTAÑA 3: AUTÓMATAS (GÓLEM Y VIDA AMBIENTAL)
+    // PESTAÑA 3: EJÉRCITO DE GÓLEMS Y COMBATE
     // ------------------------------------------------------------------------
-    motor.ui_pestana(2, "Autómata")
+    motor.ui_pestana(2, "Gólems/IA")
 
-    motor.ui_etiqueta("-- Control del Gólem Constructor --")
-    motor.ui_boton(200, "Llamar Gólem a mi Lado",           40, 130, 180)
-    motor.ui_ayuda(200, "Teletransporta al robot constructor junto a tu posición actual.")
+    motor.ui_etiqueta("-- Crear Gólems a Gusto [Tecla V] --")
+    motor.ui_boton(200, "Invocar +1 Gólem Aquí [V]",         40, 135, 185)
+    motor.ui_boton(205, "Invocar Escuadrón (+5 Gólems)",     35, 155, 145)
+    motor.ui_boton(206, "Invocar Ejército (+20 Gólems)",    135,  60, 180)
+    motor.ui_boton(207, "Reunir Todos los Gólems Aquí",      55, 110, 165)
+    motor.ui_boton(208, "Desactivar / Limpiar Gólems",      130,  55,  60)
 
-    motor.ui_boton(201, "Orden: Seguir al Jugador",         55, 150, 115)
-    motor.ui_boton(202, "Orden: Talar y Minar Solo",        35, 125,  60)
-    motor.ui_ayuda(202, "El Gólem busca árboles y piedras cercanas y las recolecta para ti.")
+    motor.ui_etiqueta("-- Orden Global para los Gólems --")
+    motor.ui_boton(201, "Orden: Escolta y Combatir Enemigos", 45, 150,  95)
+    motor.ui_boton(202, "Orden: Talar y Minar Recursos",      35, 125,  60)
+    motor.ui_boton(203, "Orden: Construir Puentes y Caminos",180, 125,  45)
+    motor.ui_boton(204, "Orden: Detener Gólems (Espera)",    100,  75,  85)
 
-    motor.ui_boton(203, "Orden: Construir Puentes/Camino", 180, 125,  45)
-    motor.ui_ayuda(203, "El Gólem avanza construyendo caminos y puentes de madera sobre el agua.")
-
-    motor.ui_boton(204, "Orden: Detener Gólem (Espera)",   110,  75,  85)
-
-    motor.ui_etiqueta("-- Dirección de Avance del Gólem --")
-    motor.ui_boton(210, "Rumbo Gólem: Norte (Arriba)",      70,  90, 135)
-    motor.ui_boton(211, "Rumbo Gólem: Sur (Abajo)",         70,  90, 135)
-    motor.ui_boton(212, "Rumbo Gólem: Este (Derecha)",      70,  90, 135)
-    motor.ui_boton(213, "Rumbo Gólem: Oeste (Izquierda)",   70,  90, 135)
+    motor.ui_etiqueta("-- Enemigos y Combate [Atacar: Tecla F] --")
+    motor.ui_interruptor(308, "Generación de Enemigos", 1)
+    motor.ui_boton(220, "Invocar Oleada de Enemigos (x6)",   195,  45,  45)
+    motor.ui_boton(221, "Curar Jugador al 100% HP",           45, 160,  80)
+    motor.ui_boton(222, "Eliminar Todos los Enemigos",       120,  60,  70)
 
     // ------------------------------------------------------------------------
-    // PESTAÑA 4: MUNDO Y EXPLORACIÓN
+    // PESTAÑA 4: MUNDO GIGANTE (64x64 CHUNKS) Y 5 BIOMAS
     // ------------------------------------------------------------------------
-    motor.ui_pestana(3, "Mundo")
+    motor.ui_pestana(3, "Biomas")
+
+    motor.ui_etiqueta("-- Viaje Rápido a Biomas (Mapa 1024x1024) --")
+    motor.ui_boton(17, "Centro: Bosque Templado (512,512)",  45, 135,  75)
+    motor.ui_boton(230, "Ir al Desierto Árido (720, 512)",  195, 165,  65)
+    motor.ui_boton(231, "Ir a la Tundra Nevada (512, 240)",  75, 145, 195)
+    motor.ui_boton(232, "Ir al Volcán de Lava (280, 512)",  185,  55,  35)
+    motor.ui_boton(233, "Ir al Pantano Místico (512, 780)",  85,  70, 145)
 
     motor.ui_etiqueta("-- Ciclo Día / Noche --")
     motor.ui_interruptor(305, "Reloj Día/Noche Auto", 1)
@@ -123,15 +139,14 @@ si (modo == 0)
     motor.ui_boton(80, "Fijar Mediodía (12:00h)",     55, 145, 205)
     motor.ui_boton(81, "Fijar Medianoche (00:00h)",   35,  45,  95)
 
-    motor.ui_etiqueta("-- Exploración de Chunks --")
-    motor.ui_progreso(400, "Regiones Descubiertas", 9, 256)
+    motor.ui_etiqueta("-- Exploración (4096 Chunks Totales) --")
+    motor.ui_progreso(400, "Regiones Exploradas", 9, 4096)
     motor.ui_interruptor(303, "Mostrar Minimapa 2D", 1)
     motor.ui_interruptor(301, "Ver Rejilla Chunks", 0)
 
     motor.ui_etiqueta("-- Semilla Procedural --")
     motor.ui_caja_texto(101, "Semilla (Número):", "2026")
     motor.ui_boton(16, "Regenerar Universo", 45, 130, 115)
-    motor.ui_boton(17, "Ir al Centro (36,36)", 45, 110, 170)
 
     // ------------------------------------------------------------------------
     // PESTAÑA 5: UX, AUDIO Y CONSOLA .LAT
@@ -149,86 +164,33 @@ si (modo == 0)
     motor.ui_boton(50, "Tema Oscuro (Studio)",    45,  55,  75)
     motor.ui_boton(51, "Tema Claro (Papel)",     150, 160, 175)
     motor.ui_boton(52, "Tema Esmeralda (Retro)",  25, 115,  85)
-    motor.ui_boton(60, "Guía Interactiva (Modal)", 175, 115, 30)
+    motor.ui_boton(60, "Guía de Combate y Gólems", 175, 115, 30)
 
-    motor.colocar_jugador(36, 36)
-    motor.golem_colocar(38, 37)
-    motor.golem_fijar_tarea(1)
-    motor.notificar("¡LatinoVox v0.7 listo! Prueba las flechas en el texto, las Semillas, la TNT y el Gólem.")
+    // Posicionar en el centro del nuevo universo gigante (512, 512) y crear 3 Gólems iniciales
+    motor.colocar_jugador(512, 512)
+    motor.golem_crear(514, 512, 1)
+    motor.golem_crear(510, 512, 1)
+    motor.golem_crear(512, 514, 3)
 
-// ============================================================================
-// MODO 1: GENERACIÓN BAJO DEMANDA DE UN CHUNK (16x16)
-// ============================================================================
-osi (modo == 1)
-    cx = motor.chunk_x()
-    cy = motor.chunk_y()
-    base_x = cx * 16
-    base_y = cy * 16
-
-    ly = 0
-    mientras (ly < 16)
-        lx = 0
-        mientras (lx < 16)
-            gx = base_x + lx
-            gy = base_y + ly
-            valor = motor.ruido(gx, gy, semilla)
-
-            si (valor < 10)
-                motor.poner_casilla(gx, gy, 2)
-            osi (valor < 16)
-                motor.poner_casilla(gx, gy, 6)
-            osi (valor > 96)
-                motor.poner_casilla(gx, gy, 7)
-            osi (valor > 80)
-                motor.poner_casilla(gx, gy, 4)
-            fin
-
-            si (gx == 36)
-                motor.poner_casilla(gx, gy, 5)
-            osi (gy == 36)
-                motor.poner_casilla(gx, gy, 5)
-            fin
-
-            si (gx == 35)
-                si (gy == 32)
-                    motor.poner_casilla(gx, gy, 12)
-                osi (gy == 40)
-                    motor.poner_casilla(gx, gy, 12)
-                fin
-            fin
-
-            si (gx == 0)
-                motor.poner_casilla(gx, gy, 1)
-            osi (gy == 0)
-                motor.poner_casilla(gx, gy, 1)
-            osi (gx == 255)
-                motor.poner_casilla(gx, gy, 1)
-            osi (gy == 255)
-                motor.poner_casilla(gx, gy, 1)
-            fin
-
-            lx = lx + 1
-        fin
-        ly = ly + 1
-    fin
-
-    si (cx == 2)
-        si (cy == 2)
-            motor.poner_cartel(36, 35, "¡Crucero Central v0.7! El robot azul es tu Gólem: dale órdenes desde la pestaña 'Autómata'.")
-            motor.poner_cartel(38, 36, "Planta Semillas (Y) para verlas crecer solas o coloca Dinamita TNT (U) y detónala con [E].")
-        fin
-    fin
+    motor.poner_cartel(512, 510, "¡Bienvenido al Mundo Gigante v0.8 (1024x1024)! Pulsa [F] para atacar con espada, [V] para crear más Gólems y [E] para Puertas, TNT y Puentes.")
+    motor.notificar("¡v0.8 Lista! Mundo 1024x1024 con 5 Biomas, Enemigos [F] y Gólems Ilimitados [V].")
+fin
 
 // ============================================================================
-// MODO 2: REACTOR DE EVENTOS DE LA GUI, CRAFTING Y ÓRDENES DEL GÓLEM
+// MODO 2: REACTOR DE EVENTOS DE LA GUI, CRAFTING, BIOMAS Y EJÉRCITO DE GÓLEMS
 // ============================================================================
-osi (modo == 2)
+si (modo == 2)
     id = motor.evento_id()
 
     si (id >= 1 && id <= 14)
         motor.seleccionar_bloque(id)
         motor.sonido(0)
         motor.notificar("Equipado: Bloque #" .. id .. " (Stock: " .. motor.inv_cantidad(id) .. ")")
+
+    osi (id == 19)
+        motor.seleccionar_bloque(19)
+        motor.sonido(0)
+        motor.notificar("Equipado: Cristal Rubí Luminoso (Stock: " .. motor.inv_cantidad(19) .. ")")
 
     osi (id == 15)
         texto_usuario = motor.ui_obtener_texto(100)
@@ -242,13 +204,39 @@ osi (modo == 2)
         nueva_semilla = motor.ui_obtener_numero(101)
         motor.cambiar_semilla(nueva_semilla)
         motor.sonido(3)
-        motor.notificar("¡Universo regenerado con la semilla " .. nueva_semilla .. "!")
+        motor.notificar("¡Universo 1024x1024 regenerado con semilla " .. nueva_semilla .. "!")
 
+    // Viajes rápidos a los 5 Biomas
     osi (id == 17)
-        motor.colocar_jugador(36, 36)
+        motor.colocar_jugador(512, 512)
         motor.sonido(0)
-        motor.notificar("Teletransportado al Crucero Central (36, 36)")
+        motor.notificar("Bioma: Bosque Templado Central (512, 512)")
 
+    osi (id == 230)
+        motor.colocar_jugador(720, 512)
+        motor.sonido(0)
+        motor.notificar("Bioma: Desierto Árido (720, 512)")
+
+    osi (id == 231)
+        motor.colocar_jugador(512, 240)
+        motor.sonido(0)
+        motor.notificar("Bioma: Tundra Nevada (512, 240)")
+
+    osi (id == 232)
+        motor.colocar_jugador(280, 512)
+        motor.sonido(0)
+        motor.notificar("Bioma: Tierras Volcánicas (280, 512)")
+
+    osi (id == 233)
+        motor.colocar_jugador(512, 780)
+        motor.sonido(0)
+        motor.notificar("Bioma: Pantano Místico (512, 780)")
+
+    // Tender puente inmediato
+    osi (id == 25)
+        motor.construir_puente()
+
+    // Construir Cabaña 5x5 (Sin usar 'sino' dentro de 'mientras')
     osi (id == 20)
         px = motor.jugador_x()
         py = motor.jugador_y()
@@ -256,21 +244,15 @@ osi (modo == 2)
         mientras (dy <= 2)
             dx = -2
             mientras (dx <= 2)
-                es_borde = 0
+                motor.poner_casilla(px + dx, py + dy, 8)
                 si (dx == -2)
-                    es_borde = 1
-                osi (dx == 2)
-                    es_borde = 1
-                osi (dy == -2)
-                    es_borde = 1
-                osi (dy == 2)
-                    es_borde = 1
-                fin
-
-                si (es_borde == 1)
                     motor.poner_casilla(px + dx, py + dy, 9)
-                sino
-                    motor.poner_casilla(px + dx, py + dy, 8)
+                osi (dx == 2)
+                    motor.poner_casilla(px + dx, py + dy, 9)
+                osi (dy == -2)
+                    motor.poner_casilla(px + dx, py + dy, 9)
+                osi (dy == 2)
+                    motor.poner_casilla(px + dx, py + dy, 9)
                 fin
                 dx = dx + 1
             fin
@@ -282,16 +264,16 @@ osi (modo == 2)
         texto_cabana = motor.ui_obtener_texto(100)
         motor.poner_cartel(px, py - 1, texto_cabana)
         motor.sonido(3)
-        motor.notificar("¡Cabaña construida! Acércate a la puerta sur y pulsa [E].")
+        motor.notificar("¡Cabaña construida! Pulsa [E] cerca de la puerta sur para abrirla o cerrarla.")
 
     // --- RECETAS DE CRAFTING ---
     osi (id == 70)
         si (motor.inv_cantidad(4) >= 1)
             motor.inv_agregar(4, -1)
-            motor.inv_agregar(8, 4)
+            motor.inv_agregar(8, 6)
             motor.seleccionar_bloque(8)
             motor.sonido(3)
-            motor.notificar("¡Artesanía: +4 Tablones de Madera!")
+            motor.notificar("¡Artesanía: +6 Bloques de Puente de Madera!")
         sino
             motor.sonido(5)
             motor.notificar("Necesitas 1 Tronco de Árbol.")
@@ -326,10 +308,10 @@ osi (modo == 2)
     osi (id == 73)
         si (motor.inv_cantidad(8) >= 2)
             motor.inv_agregar(8, -2)
-            motor.inv_agregar(10, 1)
+            motor.inv_agregar(10, 2)
             motor.seleccionar_bloque(10)
             motor.sonido(3)
-            motor.notificar("¡Artesanía: +1 Puerta Interactiva!")
+            motor.notificar("¡Artesanía: +2 Puertas Interactivas!")
         sino
             motor.sonido(5)
             motor.notificar("Necesitas 2 Tablones de Madera.")
@@ -338,10 +320,10 @@ osi (modo == 2)
     osi (id == 76)
         si (motor.inv_cantidad(4) >= 1)
             motor.inv_agregar(4, -1)
-            motor.inv_agregar(13, 3)
+            motor.inv_agregar(13, 4)
             motor.seleccionar_bloque(13)
             motor.sonido(3)
-            motor.notificar("¡Artesanía: +3 Semillas de Árbol listas para plantar!")
+            motor.notificar("¡Artesanía: +4 Semillas de Árbol!")
         sino
             motor.sonido(5)
             motor.notificar("Necesitas 1 Tronco de Árbol.")
@@ -351,67 +333,120 @@ osi (modo == 2)
         si (motor.inv_cantidad(6) >= 1 && motor.inv_cantidad(1) >= 1)
             motor.inv_agregar(6, -1)
             motor.inv_agregar(1, -1)
-            motor.inv_agregar(14, 2)
+            motor.inv_agregar(14, 3)
             motor.seleccionar_bloque(14)
             motor.sonido(3)
-            motor.notificar("¡Artesanía: +2 Cargas de Dinamita TNT fabricadas!")
+            motor.notificar("¡Artesanía: +3 Cargas de Dinamita TNT!")
         sino
             motor.sonido(5)
             motor.notificar("Necesitas 1 Arena y 1 Piedra.")
         fin
 
-    osi (id == 75)
-        motor.inv_agregar(1, 10)
-        motor.inv_agregar(4, 10)
-        motor.inv_agregar(6, 10)
-        motor.inv_agregar(8, 10)
-        motor.inv_agregar(12, 10)
-        motor.inv_agregar(13, 10)
-        motor.inv_agregar(14, 10)
-        motor.sonido(3)
-        motor.notificar("¡Recibiste +10 de todos los materiales, Semillas y TNT!")
+    osi (id == 78)
+        si (motor.inv_cantidad(19) >= 1)
+            motor.inv_agregar(19, -1)
+            motor.curar_jugador(50)
+            motor.sonido(3)
+            motor.notificar("¡Poción de Rubí bebida: +50 Puntos de Vida!")
+        sino
+            motor.sonido(5)
+            motor.notificar("Necesitas 1 Cristal Rubí (Derrota enemigos o mina en el Volcán).")
+        fin
 
-    // --- ÓRDENES DEL GÓLEM CONSTRUCTOR ---
+    osi (id == 75)
+        motor.inv_agregar(1, 20)
+        motor.inv_agregar(4, 20)
+        motor.inv_agregar(6, 20)
+        motor.inv_agregar(8, 20)
+        motor.inv_agregar(10, 10)
+        motor.inv_agregar(12, 20)
+        motor.inv_agregar(13, 20)
+        motor.inv_agregar(14, 20)
+        motor.inv_agregar(19, 10)
+        motor.sonido(3)
+        motor.notificar("¡Recibiste +20 de todos los materiales, Puentes, Puertas y TNT!")
+
+    // --- CREACIÓN ILIMITADA DE GÓLEMS Y ÓRDENES ---
     osi (id == 200)
-         motor.golem_colocar(motor.jugador_x() + 1, motor.jugador_y())
-         motor.sonido(3)
-         motor.notificar("🤖 Gólem teletransportado a tu lado.")
+        px = motor.jugador_x()
+        py = motor.jugador_y()
+        motor.golem_crear(px + 1, py, motor.golem_tarea())
+        motor.sonido(3)
+        motor.notificar("🤖 ¡Nuevo Gólem creado! Total activos: " .. motor.golem_total())
+
+    osi (id == 205)
+        px = motor.jugador_x()
+        py = motor.jugador_y()
+        t_actual = motor.golem_tarea()
+        i = 0
+        mientras (i < 5)
+            motor.golem_crear(px + (i - 2), py + 1, t_actual)
+            i = i + 1
+        fin
+        motor.sonido(3)
+        motor.notificar("🤖 ¡Escuadrón de +5 Gólems desplegado! Total: " .. motor.golem_total())
+
+    osi (id == 206)
+        px = motor.jugador_x()
+        py = motor.jugador_y()
+        t_actual = motor.golem_tarea()
+        dy = -2
+        mientras (dy <= 1)
+            dx = -2
+            mientras (dx <= 2)
+                motor.golem_crear(px + dx, py + dy, t_actual)
+                dx = dx + 1
+            fin
+            dy = dy + 1
+        fin
+        motor.sonido(3)
+        motor.notificar("🤖 ¡Ejército de +20 Gólems desplegado! Total: " .. motor.golem_total())
+
+    osi (id == 207)
+        motor.golem_reunir()
+        motor.sonido(3)
+        motor.notificar("🤖 Todos tus Gólems se han reunido en tu posición.")
+
+    osi (id == 208)
+        motor.golem_limpiar()
+        motor.sonido(0)
+        motor.notificar("🤖 Todos los Gólems han sido retirados.")
 
     osi (id == 201)
         motor.golem_fijar_tarea(1)
         motor.sonido(0)
-        motor.notificar("🤖 Gólem en modo: Seguir al Jugador.")
+        motor.notificar("🤖 Orden Global: Escoltar al jugador y atacar enemigos.")
 
     osi (id == 202)
         motor.golem_fijar_tarea(2)
         motor.sonido(0)
-        motor.notificar("🤖 Gólem en modo: Leñador y Minero Autónomo.")
+        motor.notificar("🤖 Orden Global: Talar árboles y minar recursos.")
 
     osi (id == 203)
         motor.golem_fijar_tarea(3)
         motor.sonido(0)
-        motor.notificar("🤖 Gólem en modo: Constructor de Caminos y Puentes.")
+        motor.notificar("🤖 Orden Global: Construir Puentes de Madera sobre el agua y caminos.")
 
     osi (id == 204)
         motor.golem_fijar_tarea(0)
         motor.sonido(0)
-        motor.notificar("🤖 Gólem detenido en espera.")
+        motor.notificar("🤖 Orden Global: Gólems en espera.")
 
-    osi (id == 210)
-        motor.golem_fijar_rumbo(0, -1)
-        motor.notificar("🤖 Rumbo del Gólem fijado al Norte (Arriba).")
+    // --- ENEMIGOS Y COMBATE ---
+    osi (id == 220)
+        motor.enemigo_oleada(6)
+        motor.sonido(5)
+        motor.notificar("⚔️ ¡Una oleada de 6 enemigos ha aparecido! Ataca con [F] o usa tus Gólems.")
 
-    osi (id == 211)
-        motor.golem_fijar_rumbo(0, 1)
-        motor.notificar("🤖 Rumbo del Gólem fijado al Sur (Abajo).")
+    osi (id == 221)
+        motor.curar_jugador(100)
+        motor.sonido(3)
+        motor.notificar("❤️ ¡Salud del jugador restaurada al 100%!")
 
-    osi (id == 212)
-        motor.golem_fijar_rumbo(1, 0)
-        motor.notificar("🤖 Rumbo del Gólem fijado al Este (Derecha).")
-
-    osi (id == 213)
-        motor.golem_fijar_rumbo(-1, 0)
-        motor.notificar("🤖 Rumbo del Gólem fijado al Oeste (Izquierda).")
+    osi (id == 222)
+        motor.enemigo_limpiar()
+        motor.sonido(0)
+        motor.notificar("🏳️ Todos los enemigos han sido eliminados del mapa.")
 
     // --- CONTROLES DE MUNDO Y UX ---
     osi (id == 80)
@@ -449,6 +484,9 @@ osi (modo == 2)
     osi (id == 307)
         motor.fijar_audio(motor.ui_obtener_valor(307))
 
+    osi (id == 308)
+        motor.fijar_enemigos(motor.ui_obtener_valor(308))
+
     osi (id == 50)
         motor.ui_tema(0)
 
@@ -459,160 +497,6 @@ osi (modo == 2)
         motor.ui_tema(2)
 
     osi (id == 60)
-        motor.ui_modal("Guía de Automatización, UTF-8 y Gólem (v0.7)", "1) Al editar cualquier caja de texto puedes mover el cursor con las flechas Izquierda/Derecha y escribir ñ, tildes y ¡¿ (con tu teclado o con la barra rápida de acentos).\n2) Planta Semillas (Y) para que crezcan solas a Árboles, o detona Dinamita TNT (U) pulsando [E].\n3) En la pestaña 'Autómata' dale órdenes en vivo a tu Gólem Constructor.")
-    fin
-
-// ============================================================================
-// MODO 3: EVENTO 'AL_COLOCAR' (DISPARADO AL CONSTRUIR UN BLOQUE)
-// ============================================================================
-osi (modo == 3)
-    bx = motor.evento_x()
-    by = motor.evento_y()
-    tipo = motor.evento_id()
-
-    si (tipo == 13)
-        motor.notificar("🌱 Semilla plantada en (" .. bx .. "," .. by .. "): crecerá pronto en un Árbol.")
-    osi (tipo == 14)
-        motor.notificar("💣 Dinamita TNT colocada en (" .. bx .. "," .. by .. "): pulsa [E] cerca para detonar.")
-    fin
-
-// ============================================================================
-// MODO 4: EVENTO 'AL_INTERACTUAR' CON TECLA [E] (PUERTAS, SEMILLAS Y TNT)
-// ============================================================================
-osi (modo == 4)
-    bx = motor.evento_x()
-    by = motor.evento_y()
-    tipo = motor.evento_id()
-
-    // Puerta Cerrada (10) -> Puerta Abierta (11)
-    si (tipo == 10)
-        motor.poner_casilla(bx, by, 11)
-        motor.sonido(4)
-        motor.notificar("🚪 Puerta abierta [E]")
-
-    // Puerta Abierta (11) -> Puerta Cerrada (10)
-    osi (tipo == 11)
-        motor.poner_casilla(bx, by, 10)
-        motor.sonido(4)
-        motor.notificar("🚪 Puerta cerrada [E]")
-
-    // Semilla (13) -> Crecimiento instantáneo a Árbol (4)
-    osi (tipo == 13)
-        motor.poner_casilla(bx, by, 4)
-        motor.sonido(3)
-        motor.notificar("🌳 ¡Semilla fertilizada con [E]! Ha crecido un Árbol.")
-
-    // Dinamita TNT (14) -> Explosión 3x3 que recolecta todo al inventario
-    osi (tipo == 14)
-        recolectados = 0
-        dy = -1
-        mientras (dy <= 1)
-            dx = -1
-            mientras (dx <= 1)
-                tx = bx + dx
-                ty = by + dy
-                actual = motor.obtener_casilla(tx, ty)
-                si (actual == 1)
-                    motor.inv_agregar(1, 1)
-                    recolectados = recolectados + 1
-                osi (actual == 4)
-                    motor.inv_agregar(4, 1)
-                    recolectados = recolectados + 1
-                osi (actual == 6)
-                    motor.inv_agregar(6, 1)
-                    recolectados = recolectados + 1
-                fin
-                si (tx > 0 && tx < 255 && ty > 0 && ty < 255)
-                    motor.poner_casilla(tx, ty, 5) // Deja cráter de tierra transitable
-                fin
-                dx = dx + 1
-            fin
-            dy = dy + 1
-        fin
-        motor.sonido(5)
-        motor.notificar("💥 ¡BOOM! Explosión TNT 3x3 completada (+" .. recolectados .. " recursos al inventario).")
-    fin
-
-// ============================================================================
-// MODO 5: TEMPORIZADOR DE IA DEL GÓLEM Y VIDA EN EL MUNDO (TICK CADA 0.5s)
-// ============================================================================
-osi (modo == 5)
-    tarea = motor.golem_tarea()
-    gx = motor.golem_x()
-    gy = motor.golem_y()
-
-    // TAREA 1: SEGUIR AL JUGADOR
-    si (tarea == 1)
-        jx = motor.jugador_x()
-        jy = motor.jugador_y()
-        nx = gx
-        ny = gy
-        si (jx > gx + 1)
-            nx = gx + 1
-        osi (jx < gx - 1)
-            nx = gx - 1
-        fin
-        si (jy > gy + 1)
-            ny = gy + 1
-        osi (jy < gy - 1)
-            ny = gy - 1
-        fin
-        motor.golem_colocar(nx, ny)
-
-    // TAREA 2: LEÑADOR Y MINERO AUTÓNOMO (BUSCA ÁRBOLES Y PIEDRAS EN RADIO 5x5)
-    osi (tarea == 2)
-        encontrado = 0
-        obj_x = gx
-        obj_y = gy
-        dy = -3
-        mientras (dy <= 3)
-            dx = -3
-            mientras (dx <= 3)
-                 si (encontrado == 0)
-                    t = motor.obtener_casilla(gx + dx, gy + dy)
-                    si (t == 4)
-                        encontrado = 4
-                        obj_x = gx + dx
-                        obj_y = gy + dy
-                    osi (t == 1 && (gx + dx) > 1 && (gy + dy) > 1 && (gx + dx) < 254 && (gy + dy) < 254)
-                        encontrado = 1
-                        obj_x = gx + dx
-                        obj_y = gy + dy
-                    fin
-                 fin
-                dx = dx + 1
-            fin
-            dy = dy + 1
-        fin
-
-        si (encontrado > 0)
-            motor.poner_casilla(obj_x, obj_y, 0)
-            motor.inv_agregar(encontrado, 1)
-            motor.golem_colocar(obj_x, obj_y)
-            motor.sonido(2)
-        sino
-            // Si no hay árboles cerca, avanza según su rumbo
-            nx = gx + motor.golem_dir_x()
-            ny = gy + motor.golem_dir_y()
-            si (nx > 1 && nx < 254 && ny > 1 && ny < 254)
-                motor.golem_colocar(nx, ny)
-            fin
-        fin
-
-    // TAREA 3: CONSTRUCTOR DE CAMINOS Y PUENTES DE MADERA SOBRE EL AGUA
-    osi (tarea == 3)
-        nx = gx + motor.golem_dir_x()
-        ny = gy + motor.golem_dir_y()
-        si (nx > 1 && nx < 254 && ny > 1 && ny < 254)
-            destino = motor.obtener_casilla(nx, ny)
-            si (destino == 2)
-                motor.poner_casilla(nx, ny, 8) // Agua -> Puente de Madera (8)
-                motor.sonido(1)
-            osi (destino != 8 && destino != 5)
-                motor.poner_casilla(nx, ny, 5) // Tierra/Bosque -> Camino (5)
-                motor.sonido(1)
-            fin
-            motor.golem_colocar(nx, ny)
-        fin
+        motor.ui_modal("Guía v0.8: Biomas, Combate, Puentes y Gólems", "1) [E] abre/cierra Puertas al instante, detona TNT o tiende un Puente de Madera frente al agua.\n2) La Dinamita TNT también tiene mecha automática de 3 segundos al colocarla.\n3) Pulsa [F] para atacar enemigos con tu espada y [V] para invocar todos los Gólems que quieras.\n4) Explora los 5 Biomas desde la pestaña 'Biomas'.")
     fin
 fin
