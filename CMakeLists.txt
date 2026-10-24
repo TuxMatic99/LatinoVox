@@ -45,3 +45,33 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
         -Wpedantic
     )
 endif()
+
+# Motor geométrico independiente
+add_library(latino_ui_layout STATIC
+    src/ui/ui_layout.c
+)
+
+target_include_directories(latino_ui_layout
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Pruebas automatizadas
+include(CTest)
+
+if(BUILD_TESTING)
+    add_executable(test_ui_layout
+        tests/test_ui_layout.c
+    )
+
+    target_link_libraries(test_ui_layout
+        PRIVATE
+            latino_ui_layout
+            m
+    )
+
+    add_test(
+        NAME latino_ui_layout_basico
+        COMMAND test_ui_layout
+    )
+endif()
