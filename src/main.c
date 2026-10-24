@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <locale.h>
 #include "raylib.h"
 
@@ -18,11 +19,15 @@
 #define MAP_HEIGHT (CHUNK_SIZE * WORLD_CHUNKS_Y)
 
 #define MAX_NODOS 32
-#define MAX_MSG_LEN 128
+#define MAX_MSG_LEN 192
 #define MAX_CARTELES 64
-#define MAX_WIDGETS_UI 48
+#define MAX_WIDGETS_UI 64
 #define MAX_PESTANAS_UI 6
+#define MAX_LUCES_VISIBLES 128
+#define MAX_LOGS_CONSOLA 10
+#define MAX_SEMILLAS_ACTIVAS 64
 #define ARCHIVO_GUARDADO "mundo_chunks.dat"
+#define ARCHIVO_TEMP_CONSOLA "/tmp/latino_consola_eval.lat"
 
 typedef enum {
     WIDGET_ETIQUETA = 0,
@@ -30,14 +35,26 @@ typedef enum {
     WIDGET_CAJA_TEXTO,
     WIDGET_DESLIZADOR,
     WIDGET_INTERRUPTOR,
-    WIDGET_PROGRESO
+    WIDGET_PROGRESO,
+    WIDGET_INVENTARIO
 } TipoWidget;
+
+typedef enum {
+    SONIDO_CLIC = 0,
+    SONIDO_CONSTRUIR = 1,
+    SONIDO_MINAR = 2,
+    SONIDO_CRAFT = 3,
+    SONIDO_PUERTA = 4,
+    SONIDO_ALERTA = 5,
+    TOTAL_SONIDOS = 6
+} TipoSonido;
 
 typedef struct {
     bool registrado;
     char nombre[32];
     Color color;
     bool es_solido;
+    int radio_luz;
 } DefNodo;
 
 typedef struct {
@@ -54,6 +71,13 @@ typedef struct {
 
 typedef struct {
     bool activa;
+    int gx;
+    int gy;
+    float tiempo_restante;
+} SemillaActiva;
+
+typedef struct {
+    bool activa;
     int id;
     char titulo[32];
 } PestanaUI;
@@ -63,9 +87,9 @@ typedef struct {
     TipoWidget tipo;
     int pestana;
     int id;
-    char etiqueta[48];
-    char texto[64];
-    char ayuda[128];
+    char etiqueta[64];
+    char texto[128];
+    char ayuda[160];
     Color color;
     int min_val;
     int max_val;
@@ -81,11 +105,26 @@ typedef struct {
     Color fondo_widget;
 } TemaUI;
 
+typedef struct {
+    int gx;
+    int gy;
+    int radio;
+} FuenteLuz;
+
 static DefNodo tabla_nodos[MAX_NODOS];
+static int inventario[MAX_NODOS];
 static Chunk mundo[WORLD_CHUNKS_Y][WORLD_CHUNKS_X];
 static CartelMundo lista_carteles[MAX_CARTELES];
+static SemillaActiva lista_semillas[MAX_SEMILLAS_ACTIVAS];
 
-// Estado del Frontend GUI y Pestañas
+// Fuente Tipográfica UTF-8 y Audio Procedural (raudio)
+static Font fuente_ui;
+static bool fuente_ttf_cargada = false;
+static Sound sonidos_motor[TOTAL_SONIDOS];
+static bool audio_inicializado = false;
+static bool audio_activo = true;
+
+// Estado del Frontend GUI, Pestañas y Cursor de Edición UTF-8
 static PestanaUI pestanas_ui[MAX_PESTANAS_UI];
 static int total_pestanas_ui = 0;
 static int pestana_actual = 0;
@@ -96,7 +135,11 @@ static int total_widgets_ui = 0;
 static char titulo_ui[48] = "LatinoUI Studio";
 static bool mostrar_panel_ui = true;
 static int ultimo_evento_id = 0;
+static int ultimo_evento_x = 0;
+static int ultimo_evento_y = 0;
 static int id_caja_activa = -1;
+static int cursor_caja_bytes = 0;
+static int acento_pendiente = 0; // 0 = ninguno, 1 = agudo ('), 2 = virgulilla (~)
 static int id_slider_arrastrando = -1;
 static float scroll_panel_y = 0.0f;
 static int tema_actual = 0;
@@ -104,10 +147,17 @@ static int tema_actual = 0;
 // Estado de Ventana Modal Emergente
 static bool modal_activo = false;
 static char modal_titulo[64] = "";
-static char modal_mensaje[256] = "";
+static char modal_mensaje[384] = "";
+
+// Estado de la Consola .lat Interactiva In-Game (REPL / DevTools)
+static bool consola_activa = false;
+static char entrada_consola[160] = "motor.notificar(\"¡Hola con ñ y áéíóú desde Latino!\")";
+static int cursor_consola_bytes = 0;
+static char historial_consola[MAX_LOGS_CONSOLA][160];
+static int total_logs_consola = 0;
 
 // Notificación Flotante (Toast UX)
-static char texto_toast[128] = "";
+static char texto_toast[160] = "";
 static float tiempo_toast = 0.0f;
 
 // Parámetros de comunicación C -> Latino
@@ -116,7 +166,7 @@ static int chunk_solicitado_x = 0;
 static int chunk_solicitado_y = 0;
 static int semilla_mundo = 2026;
 
-// Estado del jugador, pincel, minimapa y movimiento
+// Estado del Jugador y del Autómata Gólem
 static int jugador_x = 36;
 static int jugador_y = 36;
 static int dir_mov_x = 0;
@@ -125,10 +175,22 @@ static bool modo_un_toque = true;
 static float temporizador_paso = 0.0f;
 static int tamano_pincel = 1;
 static bool mostrar_minimapa = true;
+static bool modo_creativo = false;
+
+static int golem_x = 38;
+static int golem_y = 37;
+static int golem_tarea = 1; // 0=Espera, 1=Seguir, 2=Minar/Talar, 3=Construir Camino
+static int golem_dir_x = 1;
+static int golem_dir_y = 0;
+static float temporizador_mundo_tick = 0.0f;
+
+// Ciclo Día/Noche (0.0h a 24.0h)
+static float hora_dia = 10.0f;
+static bool ciclo_luz_auto = true;
 
 // Estado de interfaz y Auto Hot-Reload
-static int bloque_seleccionado = 5;
-static bool mostrar_bordes_chunk = true;
+static int bloque_seleccionado = 8;
+static bool mostrar_bordes_chunk = false;
 static int ajuste_fuente = 0;
 static long ultima_modificacion_script = 0;
 static float temporizador_vigilancia = 0.0f;
@@ -136,24 +198,436 @@ static float temporizador_vigilancia = 0.0f;
 static double ultimo_tiempo_vm_ms = 0.0;
 static int total_chunks_generados = 0;
 static long ram_actual_kb = 0;
-static char estado_sistema[96] = "Listo";
+static char estado_sistema[128] = "Listo";
 
 static const TemaUI paleta_temas[3] = {
-    // 0: Tema Oscuro (Studio)
-    { {16, 20, 28, 242}, {102, 191, 255, 255}, {255, 203, 0, 255}, {245, 245, 245, 255}, {102, 191, 255, 255}, {28, 34, 46, 255} },
-    // 1: Tema Claro (Papel)
-    { {235, 238, 245, 245}, {50, 90, 150, 255}, {25, 55, 110, 255}, {25, 30, 38, 255}, {40, 100, 170, 255}, {210, 216, 228, 255} },
-    // 2: Tema Esmeralda (Retro Terminal)
-    { {10, 28, 22, 242}, {45, 220, 145, 255}, {120, 255, 180, 255}, {220, 255, 235, 255}, {80, 235, 160, 255}, {18, 48, 36, 255} }
+    { {16, 20, 28, 244}, {102, 191, 255, 255}, {255, 203, 0, 255}, {245, 245, 245, 255}, {102, 191, 255, 255}, {28, 34, 46, 255} },
+    { {235, 238, 245, 248}, {50, 90, 150, 255}, {25, 55, 110, 255}, {20, 25, 32, 255}, {35, 90, 160, 255}, {210, 216, 228, 255} },
+    { {10, 28, 22, 244}, {45, 220, 145, 255}, {120, 255, 180, 255}, {220, 255, 235, 255}, {80, 235, 160, 255}, {18, 48, 36, 255} }
 };
 
-// Declaraciones anticipadas
 static void ejecutar_script_latino(int modo, int cx, int cy);
 static void actualizar_chunks_cercanos(void);
 
 // ============================================================================
-// UTILIDADES DE MEMORIA, ARCHIVOS Y ACCESO ESPACIAL A CHUNKS
+// CODIFICADOR Y EDITOR DE CADENAS UTF-8 CON SOPORTE DE CURSOR MÓVIL
 // ============================================================================
+
+// Convierte un Codepoint Unicode (ej. 241 = 'ñ') en su secuencia UTF-8 válida (1 a 4 bytes)
+static int utf8_codificar(int cp, char out[5])
+{
+    if (cp < 0x80) {
+        out[0] = (char)cp;
+        out[1] = '\0';
+        return 1;
+    } else if (cp < 0x800) {
+        out[0] = (char)(0xC0 | ((cp >> 6) & 0x1F));
+        out[1] = (char)(0x80 | (cp & 0x3F));
+        out[2] = '\0';
+        return 2;
+    } else if (cp < 0x10000) {
+        out[0] = (char)(0xE0 | ((cp >> 12) & 0x0F));
+        out[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[2] = (char)(0x80 | (cp & 0x3F));
+        out[3] = '\0';
+        return 3;
+    }
+    out[0] = '\0';
+    return 0;
+}
+
+// Retrocede al inicio del carácter UTF-8 anterior
+static int utf8_prev_char(const char *s, int pos)
+{
+    if (pos <= 0) return 0;
+    pos--;
+    while (pos > 0 && (((unsigned char)s[pos] & 0xC0) == 0x80)) {
+        pos--;
+    }
+    return pos;
+}
+
+// Avanza al inicio del carácter UTF-8 siguiente
+static int utf8_next_char(const char *s, int pos)
+{
+    int len = (int)strlen(s);
+    if (pos >= len) return len;
+    pos++;
+    while (pos < len && (((unsigned char)s[pos] & 0xC0) == 0x80)) {
+        pos++;
+    }
+    return pos;
+}
+
+// Inserta una secuencia UTF-8 en la posición exacta del cursor
+static void utf8_insertar_en_cursor(char *buf, size_t cap, int *cursor, const char *ins)
+{
+    size_t len_buf = strlen(buf);
+    size_t len_ins = strlen(ins);
+    if (len_ins == 0 || len_buf + len_ins + 1 >= cap) return;
+
+    if (*cursor < 0) *cursor = 0;
+    if (*cursor > (int)len_buf) *cursor = (int)len_buf;
+
+    memmove(buf + *cursor + len_ins, buf + *cursor, len_buf - (size_t)(*cursor) + 1);
+    memcpy(buf + *cursor, ins, len_ins);
+    *cursor += (int)len_ins;
+}
+
+// Borra el carácter UTF-8 completo a la izquierda del cursor (Backspace)
+static void utf8_borrar_atras(char *buf, int *cursor)
+{
+    int len = (int)strlen(buf);
+    if (*cursor <= 0 || len <= 0) return;
+    if (*cursor > len) *cursor = len;
+
+    int prev = utf8_prev_char(buf, *cursor);
+    int bytes_borrar = *cursor - prev;
+    memmove(buf + prev, buf + *cursor, (size_t)(len - *cursor + 1));
+    *cursor = prev;
+}
+
+// Borra el carácter UTF-8 completo a la derecha del cursor (Supr / Delete)
+static void utf8_borrar_adelante(char *buf, int *cursor)
+{
+    int len = (int)strlen(buf);
+    if (*cursor < 0 || *cursor >= len) return;
+
+    int next = utf8_next_char(buf, *cursor);
+    memmove(buf + *cursor, buf + next, (size_t)(len - next + 1));
+}
+
+// Construye una cadena visual insertando el símbolo '|' en la posición del cursor
+static void construir_texto_con_cursor(const char *texto, int cursor, bool mostrar_barra, char *salida, size_t cap_salida)
+{
+    int len = (int)strlen(texto);
+    if (cursor < 0) cursor = 0;
+    if (cursor > len) cursor = len;
+
+    if (!mostrar_barra) {
+        snprintf(salida, cap_salida, "%s", texto);
+        return;
+    }
+
+    snprintf(salida, cap_salida, "%.*s|%s", cursor, texto, texto + cursor);
+}
+
+// Procesa teclado para cualquier buffer UTF-8 con soporte de flechas, tildes muertas y ñ
+static void procesar_edicion_utf8(char *buf, size_t cap, int *cursor)
+{
+    int len = (int)strlen(buf);
+    if (*cursor < 0) *cursor = 0;
+    if (*cursor > len) *cursor = len;
+
+    // Navegación con flechas Izquierda / Derecha, Inicio y Fin
+    if (IsKeyPressed(KEY_LEFT) || IsKeyPressedRepeat(KEY_LEFT)) {
+        *cursor = utf8_prev_char(buf, *cursor);
+        acento_pendiente = 0;
+    }
+    if (IsKeyPressed(KEY_RIGHT) || IsKeyPressedRepeat(KEY_RIGHT)) {
+        *cursor = utf8_next_char(buf, *cursor);
+        acento_pendiente = 0;
+    }
+    if (IsKeyPressed(KEY_HOME)) {
+        *cursor = 0;
+        acento_pendiente = 0;
+    }
+    if (IsKeyPressed(KEY_END)) {
+        *cursor = (int)strlen(buf);
+        acento_pendiente = 0;
+    }
+
+    // Borrado hacia atrás (Backspace) y hacia adelante (Delete)
+    if (IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) {
+        if (acento_pendiente != 0) {
+            acento_pendiente = 0;
+        } else {
+            utf8_borrar_atras(buf, cursor);
+        }
+    }
+    if (IsKeyPressed(KEY_DELETE) || IsKeyPressedRepeat(KEY_DELETE)) {
+        utf8_borrar_adelante(buf, cursor);
+    }
+
+    // Lectura de puntos de código Unicode enviados por el sistema
+    int cp = GetCharPressed();
+    while (cp > 0) {
+        // Tecla muerta de acento agudo (´ = 180)
+        if (cp == 180) {
+            acento_pendiente = 1;
+            cp = GetCharPressed();
+            continue;
+        }
+        // Si el usuario presiona '~' para componer ñ
+        if (cp == '~' && acento_pendiente == 0) {
+            acento_pendiente = 2;
+            cp = GetCharPressed();
+            continue;
+        }
+
+        int cp_final = cp;
+        if (acento_pendiente == 1) {
+            if      (cp == 'a') cp_final = 225; // á
+            else if (cp == 'e') cp_final = 233; // é
+            else if (cp == 'i') cp_final = 237; // í
+            else if (cp == 'o') cp_final = 243; // ó
+            else if (cp == 'u') cp_final = 250; // ú
+            else if (cp == 'A') cp_final = 193; // Á
+            else if (cp == 'E') cp_final = 201; // É
+            else if (cp == 'I') cp_final = 205; // Í
+            else if (cp == 'O') cp_final = 211; // Ó
+            else if (cp == 'U') cp_final = 218; // Ú
+            else if (cp == 'n') cp_final = 241; // ñ
+            else if (cp == 'N') cp_final = 209; // Ñ
+            acento_pendiente = 0;
+        } else if (acento_pendiente == 2) {
+            if      (cp == 'n') cp_final = 241; // ñ
+            else if (cp == 'N') cp_final = 209; // Ñ
+            else {
+                utf8_insertar_en_cursor(buf, cap, cursor, "~");
+            }
+            acento_pendiente = 0;
+        }
+
+        if (cp_final >= 32) {
+            char utf8_seq[5];
+            if (utf8_codificar(cp_final, utf8_seq) > 0) {
+                utf8_insertar_en_cursor(buf, cap, cursor, utf8_seq);
+            }
+        }
+
+        cp = GetCharPressed();
+    }
+}
+
+// ============================================================================
+// SISTEMA DE AUDIO PROCEDURAL EN MEMORIA (RAUDIO)
+// ============================================================================
+
+static Sound generar_sonido_sintetico(float freq_ini, float freq_fin, float duracion_seg, int tipo_onda)
+{
+    int sample_rate = 44100;
+    int total_muestras = (int)(sample_rate * duracion_seg);
+    short *datos = (short *)malloc((size_t)total_muestras * sizeof(short));
+
+    float fase = 0.0f;
+    for (int i = 0; i < total_muestras; i++) {
+        float progreso = (float)i / (float)total_muestras;
+        float freq = freq_ini + (freq_fin - freq_ini) * progreso;
+        float envolvente = 1.0f - progreso;
+
+        if (tipo_onda == 2 && progreso > 0.5f) {
+            freq = freq_fin * 1.25f;
+        }
+
+        fase += (2.0f * 3.14159265f * freq) / (float)sample_rate;
+        float muestra = sinf(fase);
+
+        if (tipo_onda == 1) {
+            muestra = (muestra >= 0.0f ? 0.8f : -0.8f);
+        }
+
+        datos[i] = (short)(muestra * envolvente * 9500.0f);
+    }
+
+    Wave onda = { 0 };
+    onda.frameCount = (unsigned int)total_muestras;
+    onda.sampleRate = (unsigned int)sample_rate;
+    onda.sampleSize = 16;
+    onda.channels = 1;
+    onda.data = datos;
+
+    Sound s = LoadSoundFromWave(onda);
+    free(datos);
+    return s;
+}
+
+static void inicializar_audio_procedural(void)
+{
+    InitAudioDevice();
+    if (!IsAudioDeviceReady()) return;
+
+    sonidos_motor[SONIDO_CLIC]      = generar_sonido_sintetico(680.0f,  920.0f, 0.045f, 0);
+    sonidos_motor[SONIDO_CONSTRUIR] = generar_sonido_sintetico(240.0f,  160.0f, 0.075f, 0);
+    sonidos_motor[SONIDO_MINAR]     = generar_sonido_sintetico(420.0f,  190.0f, 0.065f, 1);
+    sonidos_motor[SONIDO_CRAFT]     = generar_sonido_sintetico(440.0f,  660.0f, 0.180f, 2);
+    sonidos_motor[SONIDO_PUERTA]    = generar_sonido_sintetico(300.0f,  460.0f, 0.110f, 1);
+    sonidos_motor[SONIDO_ALERTA]    = generar_sonido_sintetico(220.0f,  140.0f, 0.160f, 1);
+
+    audio_inicializado = true;
+}
+
+static void reproducir_sonido_motor(int id)
+{
+    if (!audio_inicializado || !audio_activo) return;
+    if (id >= 0 && id < TOTAL_SONIDOS) {
+        PlaySound(sonidos_motor[id]);
+    }
+}
+
+static void cerrar_audio_procedural(void)
+{
+    if (!audio_inicializado) return;
+    for (int i = 0; i < TOTAL_SONIDOS; i++) {
+        UnloadSound(sonidos_motor[i]);
+    }
+    CloseAudioDevice();
+}
+
+// ============================================================================
+// MOTOR TIPOGRÁFICO UTF-8 CON AUTOAJUSTE Y SALTO DE LÍNEA (SIN WARNINGS GCC)
+// ============================================================================
+
+static void inicializar_fuente_utf8(void)
+{
+    const char *rutas_ttf[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        NULL
+    };
+
+    int codepoints[224];
+    for (int i = 0; i < 224; i++) {
+        codepoints[i] = 32 + i;
+    }
+
+    for (int r = 0; rutas_ttf[r] != NULL; r++) {
+        if (FileExists(rutas_ttf[r])) {
+            fuente_ui = LoadFontEx(rutas_ttf[r], 32, codepoints, 224);
+            SetTextureFilter(fuente_ui.texture, TEXTURE_FILTER_BILINEAR);
+            fuente_ttf_cargada = true;
+            break;
+        }
+    }
+
+    if (!fuente_ttf_cargada) {
+        fuente_ui = GetFontDefault();
+    }
+}
+
+static int medir_texto_ui(const char *texto, int font_size)
+{
+    if (texto == NULL || texto[0] == '\0') return 0;
+    Vector2 dim = MeasureTextEx(fuente_ui, texto, (float)font_size, 1.0f);
+    return (int)dim.x;
+}
+
+static void dibujar_texto_ui(const char *texto, int x, int y, int font_size, Color color)
+{
+    if (texto == NULL || texto[0] == '\0') return;
+    DrawTextEx(fuente_ui, texto, (Vector2){ (float)x, (float)y }, (float)font_size, 1.0f, color);
+}
+
+static void dibujar_texto_ajustado(const char *texto, Rectangle caja, int font_max, bool centrar, Color color)
+{
+    if (texto == NULL || texto[0] == '\0') return;
+
+    int font_actual = font_max;
+    int max_w = (int)caja.width - 12;
+    if (max_w < 20) max_w = 20;
+
+    while (font_actual > 12 && medir_texto_ui(texto, font_actual) > max_w) {
+        font_actual--;
+    }
+
+    int ancho_txt = medir_texto_ui(texto, font_actual);
+    int pos_x = centrar ? (int)caja.x + ((int)caja.width - ancho_txt) / 2 : (int)caja.x + 8;
+    if (pos_x < (int)caja.x + 4) pos_x = (int)caja.x + 4;
+    int pos_y = (int)caja.y + ((int)caja.height - font_actual) / 2;
+
+    if (ancho_txt > max_w) {
+        // Si el texto es más largo que la caja, mostramos el extremo derecho (útil al escribir)
+        const char *vista = texto;
+        while (*vista != '\0' && medir_texto_ui(vista, font_actual) > max_w) {
+            vista = texto + utf8_next_char(texto, (int)(vista - texto));
+        }
+        dibujar_texto_ui(vista, (int)caja.x + 6, pos_y, font_actual, color);
+    } else {
+        dibujar_texto_ui(texto, pos_x, pos_y, font_actual, color);
+    }
+}
+
+static int procesar_texto_multilinea(const char *texto, Rectangle area, int font_size, Color color, bool dibujar)
+{
+    if (texto == NULL || texto[0] == '\0') return font_size + 8;
+
+    int max_w = (int)area.width;
+    if (max_w < 60) max_w = 60;
+
+    char copia[512];
+    snprintf(copia, sizeof(copia), "%s", texto);
+
+    char linea_actual[256] = "";
+    char linea_prueba[640] = ""; // Buffer amplio para evitar -Wformat-truncation
+    int cursor_y = (int)area.y;
+    int salto_y = font_size + 6;
+
+    const char *p = copia;
+    while (*p != '\0') {
+        if (*p == '\n') {
+            if (dibujar && linea_actual[0] != '\0') {
+                dibujar_texto_ui(linea_actual, (int)area.x, cursor_y, font_size, color);
+            }
+            linea_actual[0] = '\0';
+            cursor_y += salto_y;
+            p++;
+            continue;
+        }
+
+        char palabra[128];
+        int wi = 0;
+        while (*p != '\0' && *p != ' ' && *p != '\n' && wi < (int)sizeof(palabra) - 1) {
+            palabra[wi++] = *p++;
+        }
+        palabra[wi] = '\0';
+        while (*p == ' ') p++;
+
+        if (linea_actual[0] == '\0') {
+            snprintf(linea_prueba, sizeof(linea_prueba), "%s", palabra);
+        } else {
+            snprintf(linea_prueba, sizeof(linea_prueba), "%.250s %.120s", linea_actual, palabra);
+        }
+
+        if (medir_texto_ui(linea_prueba, font_size) <= max_w) {
+            snprintf(linea_actual, sizeof(linea_actual), "%.254s", linea_prueba);
+        } else {
+            if (dibujar && linea_actual[0] != '\0') {
+                dibujar_texto_ui(linea_actual, (int)area.x, cursor_y, font_size, color);
+            }
+            snprintf(linea_actual, sizeof(linea_actual), "%s", palabra);
+            cursor_y += salto_y;
+        }
+    }
+
+    if (linea_actual[0] != '\0') {
+        if (dibujar) {
+            dibujar_texto_ui(linea_actual, (int)area.x, cursor_y, font_size, color);
+        }
+        cursor_y += salto_y;
+    }
+
+    return (cursor_y - (int)area.y);
+}
+
+// ============================================================================
+// UTILIDADES DE MEMORIA, CONSOLA Y ACCESO ESPACIAL A CHUNKS
+// ============================================================================
+
+static void agregar_log_consola(const char *texto)
+{
+    if (texto == NULL) return;
+    if (total_logs_consola < MAX_LOGS_CONSOLA) {
+        snprintf(historial_consola[total_logs_consola++], sizeof(historial_consola[0]), "%s", texto);
+    } else {
+        // Desplazar bloques con memmove evita la advertencia -Wrestrict de GCC
+        memmove(historial_consola[0],
+                historial_consola[1],
+                (size_t)(MAX_LOGS_CONSOLA - 1) * sizeof(historial_consola[0]));
+        snprintf(historial_consola[MAX_LOGS_CONSOLA - 1], sizeof(historial_consola[0]), "%s", texto);
+    }
+}
 
 static const char *obtener_ruta_script(void)
 {
@@ -187,6 +661,19 @@ static void mostrar_notificacion_toast(const char *msg)
     tiempo_toast = 3.5f;
 }
 
+static void registrar_semilla_activa(int gx, int gy)
+{
+    for (int i = 0; i < MAX_SEMILLAS_ACTIVAS; i++) {
+        if (!lista_semillas[i].activa || (lista_semillas[i].gx == gx && lista_semillas[i].gy == gy)) {
+            lista_semillas[i].activa = true;
+            lista_semillas[i].gx = gx;
+            lista_semillas[i].gy = gy;
+            lista_semillas[i].tiempo_restante = 6.0f; // Crece a Árbol en 6 segundos
+            return;
+        }
+    }
+}
+
 static void establecer_casilla_mundo(int gx, int gy, int tipo)
 {
     if (gx < 0 || gx >= MAP_WIDTH || gy < 0 || gy >= MAP_HEIGHT) return;
@@ -198,6 +685,9 @@ static void establecer_casilla_mundo(int gx, int gy, int tipo)
     int ly = gy % CHUNK_SIZE;
 
     mundo[cy][cx].casillas[ly][lx] = (unsigned char)tipo;
+    if (tipo == 13) {
+        registrar_semilla_activa(gx, gy);
+    }
 }
 
 static int obtener_casilla_mundo(int gx, int gy)
@@ -236,7 +726,7 @@ static WidgetUI *buscar_widget_por_id(int id)
 }
 
 // ============================================================================
-// PUENTE FFI (C <-> LATINO): API "motor.*" (MUNDO + FRONTEND GUI + UX)
+// PUENTE FFI (C <-> LATINO): API "motor.*" (INCLUYE EVENTOS Y GÓLEM)
 // ============================================================================
 
 static void motor_registrar_nodo(lat_mv *mv)
@@ -262,6 +752,128 @@ static void motor_registrar_nodo(lat_mv *mv)
             (unsigned char)r, (unsigned char)g, (unsigned char)b, 255
         };
         tabla_nodos[id].es_solido = (solido != 0);
+    }
+}
+
+static void motor_nodo_luz(lat_mv *mv)
+{
+    lat_objeto *o_radio = latC_desapilar(mv);
+    lat_objeto *o_id    = latC_desapilar(mv);
+
+    int id = (int)latC_checar_numerico(mv, o_id);
+    int radio = (int)latC_checar_numerico(mv, o_radio);
+
+    if (id >= 0 && id < MAX_NODOS) {
+        tabla_nodos[id].radio_luz = radio;
+    }
+}
+
+static void motor_sonido(lat_mv *mv)
+{
+    lat_objeto *o_id = latC_desapilar(mv);
+    int id = (int)latC_checar_numerico(mv, o_id);
+    reproducir_sonido_motor(id);
+}
+
+static void motor_fijar_audio(lat_mv *mv)
+{
+    lat_objeto *o_est = latC_desapilar(mv);
+    audio_activo = ((int)latC_checar_numerico(mv, o_est) != 0);
+}
+
+static void motor_abrir_consola(lat_mv *mv)
+{
+    (void)mv;
+    consola_activa = !consola_activa;
+    cursor_consola_bytes = (int)strlen(entrada_consola);
+    id_caja_activa = -1;
+}
+
+static void motor_inv_cantidad(lat_mv *mv)
+{
+    lat_objeto *o_id = latC_desapilar(mv);
+    int id = (int)latC_checar_numerico(mv, o_id);
+    int cant = (id >= 0 && id < MAX_NODOS) ? inventario[id] : 0;
+    latC_apilar(mv, latC_crear_numerico(mv, (double)cant));
+}
+
+static void motor_inv_agregar(lat_mv *mv)
+{
+    lat_objeto *o_cant = latC_desapilar(mv);
+    lat_objeto *o_id   = latC_desapilar(mv);
+
+    int id   = (int)latC_checar_numerico(mv, o_id);
+    int cant = (int)latC_checar_numerico(mv, o_cant);
+
+    if (id >= 0 && id < MAX_NODOS) {
+        inventario[id] += cant;
+        if (inventario[id] < 0) inventario[id] = 0;
+        if (inventario[id] > 999) inventario[id] = 999;
+    }
+}
+
+// Funciones FFI del Autómata Gólem
+static void motor_golem_colocar(lat_mv *mv)
+{
+    lat_objeto *o_y = latC_desapilar(mv);
+    lat_objeto *o_x = latC_desapilar(mv);
+    int gx = (int)latC_checar_numerico(mv, o_x);
+    int gy = (int)latC_checar_numerico(mv, o_y);
+    if (gx > 0 && gx < MAP_WIDTH - 1 && gy > 0 && gy < MAP_HEIGHT - 1) {
+        golem_x = gx;
+        golem_y = gy;
+    }
+}
+
+static void motor_golem_x(lat_mv *mv)
+{
+    latC_apilar(mv, latC_crear_numerico(mv, (double)golem_x));
+}
+
+static void motor_golem_y(lat_mv *mv)
+{
+    latC_apilar(mv, latC_crear_numerico(mv, (double)golem_y));
+}
+
+static void motor_golem_tarea(lat_mv *mv)
+{
+    latC_apilar(mv, latC_crear_numerico(mv, (double)golem_tarea));
+}
+
+static void motor_golem_fijar_tarea(lat_mv *mv)
+{
+    lat_objeto *o_t = latC_desapilar(mv);
+    golem_tarea = (int)latC_checar_numerico(mv, o_t);
+}
+
+static void motor_golem_fijar_rumbo(lat_mv *mv)
+{
+    lat_objeto *o_dy = latC_desapilar(mv);
+    lat_objeto *o_dx = latC_desapilar(mv);
+    golem_dir_x = (int)latC_checar_numerico(mv, o_dx);
+    golem_dir_y = (int)latC_checar_numerico(mv, o_dy);
+}
+
+static void motor_golem_dir_x(lat_mv *mv)
+{
+    latC_apilar(mv, latC_crear_numerico(mv, (double)golem_dir_x));
+}
+
+static void motor_golem_dir_y(lat_mv *mv)
+{
+    latC_apilar(mv, latC_crear_numerico(mv, (double)golem_dir_y));
+}
+
+static void motor_ui_resumen_inv(lat_mv *mv)
+{
+    (void)mv;
+    if (total_widgets_ui < MAX_WIDGETS_UI) {
+        WidgetUI *w = &widgets_ui[total_widgets_ui++];
+        memset(w, 0, sizeof(WidgetUI));
+        w->activo = true;
+        w->tipo = WIDGET_INVENTARIO;
+        w->pestana = pestana_en_construccion;
+        w->id = -2;
     }
 }
 
@@ -506,6 +1118,16 @@ static void motor_evento_id(lat_mv *mv)
     latC_apilar(mv, latC_crear_numerico(mv, (double)ultimo_evento_id));
 }
 
+static void motor_evento_x(lat_mv *mv)
+{
+    latC_apilar(mv, latC_crear_numerico(mv, (double)ultimo_evento_x));
+}
+
+static void motor_evento_y(lat_mv *mv)
+{
+    latC_apilar(mv, latC_crear_numerico(mv, (double)ultimo_evento_y));
+}
+
 static void motor_seleccionar_bloque(lat_mv *mv)
 {
     lat_objeto *o_id = latC_desapilar(mv);
@@ -544,6 +1166,30 @@ static void motor_fijar_minimapa(lat_mv *mv)
     mostrar_minimapa = ((int)latC_checar_numerico(mv, o_est) != 0);
 }
 
+static void motor_fijar_creativo(lat_mv *mv)
+{
+    lat_objeto *o_est = latC_desapilar(mv);
+    modo_creativo = ((int)latC_checar_numerico(mv, o_est) != 0);
+}
+
+static void motor_fijar_ciclo_luz(lat_mv *mv)
+{
+    lat_objeto *o_est = latC_desapilar(mv);
+    ciclo_luz_auto = ((int)latC_checar_numerico(mv, o_est) != 0);
+}
+
+static void motor_fijar_hora(lat_mv *mv)
+{
+    lat_objeto *o_hora = latC_desapilar(mv);
+    float h = (float)latC_checar_numerico(mv, o_hora);
+    while (h < 0.0f) h += 24.0f;
+    while (h >= 24.0f) h -= 24.0f;
+    hora_dia = h;
+
+    WidgetUI *w_hora = buscar_widget_por_id(306);
+    if (w_hora != NULL) w_hora->valor = (int)hora_dia;
+}
+
 static void motor_semilla(lat_mv *mv)
 {
     latC_apilar(mv, latC_crear_numerico(mv, (double)semilla_mundo));
@@ -555,6 +1201,7 @@ static void motor_cambiar_semilla(lat_mv *mv)
     semilla_mundo = (int)latC_checar_numerico(mv, o_sem);
     memset(mundo, 0, sizeof(mundo));
     memset(lista_carteles, 0, sizeof(lista_carteles));
+    memset(lista_semillas, 0, sizeof(lista_semillas));
     total_chunks_generados = 0;
 }
 
@@ -675,6 +1322,21 @@ static void motor_ruido(lat_mv *mv)
 
 static const lat_CReg libmotor[] = {
     {"registrar_nodo",     motor_registrar_nodo,     6},
+    {"nodo_luz",           motor_nodo_luz,           2},
+    {"sonido",             motor_sonido,             1},
+    {"fijar_audio",        motor_fijar_audio,        1},
+    {"abrir_consola",      motor_abrir_consola,      0},
+    {"inv_cantidad",       motor_inv_cantidad,       1},
+    {"inv_agregar",        motor_inv_agregar,        2},
+    {"golem_colocar",      motor_golem_colocar,      2},
+    {"golem_x",            motor_golem_x,            0},
+    {"golem_y",            motor_golem_y,            0},
+    {"golem_tarea",        motor_golem_tarea,        0},
+    {"golem_fijar_tarea",  motor_golem_fijar_tarea,  1},
+    {"golem_fijar_rumbo",  motor_golem_fijar_rumbo,  2},
+    {"golem_dir_x",        motor_golem_dir_x,        0},
+    {"golem_dir_y",        motor_golem_dir_y,        0},
+    {"ui_resumen_inv",     motor_ui_resumen_inv,     0},
     {"ui_titulo",          motor_ui_titulo,          1},
     {"ui_pestana",         motor_ui_pestana,         2},
     {"ui_etiqueta",        motor_ui_etiqueta,        1},
@@ -690,12 +1352,17 @@ static const lat_CReg libmotor[] = {
     {"ui_obtener_numero",  motor_ui_obtener_numero,  1},
     {"ui_obtener_valor",   motor_ui_obtener_valor,   1},
     {"evento_id",          motor_evento_id,          0},
+    {"evento_x",           motor_evento_x,           0},
+    {"evento_y",           motor_evento_y,           0},
     {"boton_clicado",      motor_evento_id,          0},
     {"seleccionar_bloque", motor_seleccionar_bloque, 1},
     {"fijar_pincel",       motor_fijar_pincel,       1},
     {"fijar_rejilla",      motor_fijar_rejilla,      1},
     {"fijar_marcha",       motor_fijar_marcha,       1},
     {"fijar_minimapa",     motor_fijar_minimapa,     1},
+    {"fijar_creativo",     motor_fijar_creativo,     1},
+    {"fijar_ciclo_luz",    motor_fijar_ciclo_luz,    1},
+    {"fijar_hora",         motor_fijar_hora,         1},
     {"semilla",            motor_semilla,            0},
     {"cambiar_semilla",    motor_cambiar_semilla,    1},
     {"notificar",          motor_notificar,          1},
@@ -713,7 +1380,7 @@ static const lat_CReg libmotor[] = {
 };
 
 // ============================================================================
-// EJECUCIÓN DE LATINO Y GENERACIÓN DE CHUNKS
+// EJECUCIÓN DE SCRIPTS LATINO Y EVALUADOR DE CONSOLA IN-GAME (REPL)
 // ============================================================================
 
 static void ejecutar_script_latino(int modo, int cx, int cy)
@@ -750,6 +1417,51 @@ static void ejecutar_script_latino(int modo, int cx, int cy)
     ram_actual_kb = obtener_ram_kb();
 }
 
+static void evaluar_comando_consola_latino(const char *codigo)
+{
+    if (codigo == NULL || codigo[0] == '\0') return;
+
+    char reg_cmd[160];
+    snprintf(reg_cmd, sizeof(reg_cmd), "latino> %.145s", codigo);
+    agregar_log_consola(reg_cmd);
+
+    FILE *f = fopen(ARCHIVO_TEMP_CONSOLA, "w");
+    if (f == NULL) {
+        agregar_log_consola("[Error] No se pudo crear el buffer temporal.");
+        return;
+    }
+    fprintf(f, "%s\n", codigo);
+    fclose(f);
+
+    double t0 = GetTime();
+    lat_mv *mv = latC_crear_mv();
+    latC_abrir_liblatino(mv, "motor", libmotor);
+
+    int status = 0;
+    mv->nombre_archivo = (char *)ARCHIVO_TEMP_CONSOLA;
+    mv->global->REPL = false;
+
+    ast *nodo = latA_analizar_arch((char *)ARCHIVO_TEMP_CONSOLA, &status);
+    if (status == 0 && nodo != NULL) {
+        lat_objeto *main_func = latC_analizar(mv, nodo);
+        latC_llamar_funcion(mv, main_func);
+        latO_destruir(mv, main_func);
+        latA_destruir(nodo);
+        ultimo_tiempo_vm_ms = (GetTime() - t0) * 1000.0;
+
+        char ok_msg[160];
+        snprintf(ok_msg, sizeof(ok_msg), "  [OK en %.2f ms] -> %.110s", ultimo_tiempo_vm_ms, estado_sistema);
+        agregar_log_consola(ok_msg);
+        reproducir_sonido_motor(SONIDO_CLIC);
+    } else {
+        agregar_log_consola("  [Error de Sintaxis] Revisa la instrucción en español.");
+        reproducir_sonido_motor(SONIDO_ALERTA);
+    }
+
+    latC_destruir_mv(mv);
+    actualizar_chunks_cercanos();
+}
+
 static void generar_chunk_bajo_demanda(int cx, int cy)
 {
     if (cx < 0 || cx >= WORLD_CHUNKS_X || cy < 0 || cy >= WORLD_CHUNKS_Y) return;
@@ -760,7 +1472,6 @@ static void generar_chunk_bajo_demanda(int cx, int cy)
     ejecutar_script_latino(1, cx, cy);
     total_chunks_generados++;
 
-    // Actualizar automáticamente cualquier barra de progreso con ID 400
     WidgetUI *w_prog = buscar_widget_por_id(400);
     if (w_prog != NULL && w_prog->tipo == WIDGET_PROGRESO) {
         w_prog->valor = total_chunks_generados;
@@ -779,14 +1490,18 @@ static void actualizar_chunks_cercanos(void)
     }
 }
 
-static void inicializar_mundo_con_latino(bool conservar_posicion)
+static void inicializar_mundo_con_latino(bool conservar_estado)
 {
     int prev_x = jugador_x;
     int prev_y = jugador_y;
+    int inv_copia[MAX_NODOS];
+    memcpy(inv_copia, inventario, sizeof(inventario));
 
     memset(mundo, 0, sizeof(mundo));
     memset(lista_carteles, 0, sizeof(lista_carteles));
+    memset(lista_semillas, 0, sizeof(lista_semillas));
     memset(tabla_nodos, 0, sizeof(tabla_nodos));
+    memset(inventario, 0, sizeof(inventario));
     memset(widgets_ui, 0, sizeof(widgets_ui));
     memset(pestanas_ui, 0, sizeof(pestanas_ui));
     total_widgets_ui = 0;
@@ -798,8 +1513,8 @@ static void inicializar_mundo_con_latino(bool conservar_posicion)
     dir_mov_x = 0;
     dir_mov_y = 0;
 
-    tabla_nodos[0] = (DefNodo){ true, "Pasto",  (Color){175, 215, 155, 255}, false };
-    tabla_nodos[1] = (DefNodo){ true, "Piedra", DARKGRAY, true };
+    tabla_nodos[0] = (DefNodo){ true, "Pasto",  (Color){175, 215, 155, 255}, false, 0 };
+    tabla_nodos[1] = (DefNodo){ true, "Piedra", DARKGRAY, true, 0 };
 
     const char *ruta = obtener_ruta_script();
     if (ruta != NULL) {
@@ -808,9 +1523,10 @@ static void inicializar_mundo_con_latino(bool conservar_posicion)
 
     ejecutar_script_latino(0, 0, 0);
 
-    if (conservar_posicion) {
+    if (conservar_estado) {
         jugador_x = prev_x;
         jugador_y = prev_y;
+        memcpy(inventario, inv_copia, sizeof(inventario));
     }
 
     actualizar_chunks_cercanos();
@@ -826,11 +1542,15 @@ static void guardar_mundo_disco(void)
     if (f != NULL) {
         fwrite(&jugador_x, sizeof(int), 1, f);
         fwrite(&jugador_y, sizeof(int), 1, f);
+        fwrite(&golem_x, sizeof(int), 1, f);
+        fwrite(&golem_y, sizeof(int), 1, f);
         fwrite(&total_chunks_generados, sizeof(int), 1, f);
+        fwrite(inventario, sizeof(inventario), 1, f);
         fwrite(mundo, sizeof(mundo), 1, f);
         fwrite(lista_carteles, sizeof(lista_carteles), 1, f);
         fclose(f);
-        mostrar_notificacion_toast("Mundo guardado en disco correctamente");
+        reproducir_sonido_motor(SONIDO_CRAFT);
+        mostrar_notificacion_toast("¡Mundo, Gólem e Inventario guardados en disco!");
     }
 }
 
@@ -840,18 +1560,23 @@ static void cargar_mundo_disco(void)
     if (f != NULL) {
         if (fread(&jugador_x, sizeof(int), 1, f) == 1 &&
             fread(&jugador_y, sizeof(int), 1, f) == 1 &&
+            fread(&golem_x, sizeof(int), 1, f) == 1 &&
+            fread(&golem_y, sizeof(int), 1, f) == 1 &&
             fread(&total_chunks_generados, sizeof(int), 1, f) == 1 &&
+            fread(inventario, sizeof(inventario), 1, f) == 1 &&
             fread(mundo, sizeof(mundo), 1, f) == 1 &&
             fread(lista_carteles, sizeof(lista_carteles), 1, f) == 1) {
             dir_mov_x = 0;
             dir_mov_y = 0;
             WidgetUI *w_prog = buscar_widget_por_id(400);
             if (w_prog != NULL) w_prog->valor = total_chunks_generados;
-            mostrar_notificacion_toast("Mundo cargado desde disco correctamente");
+            reproducir_sonido_motor(SONIDO_CRAFT);
+            mostrar_notificacion_toast("¡Mundo, Gólem e Inventario cargados correctamente!");
         }
         fclose(f);
     } else {
-        mostrar_notificacion_toast("Aun no existe un archivo guardado");
+        reproducir_sonido_motor(SONIDO_ALERTA);
+        mostrar_notificacion_toast("Aún no existe un archivo guardado.");
     }
 }
 
@@ -873,24 +1598,136 @@ static const char *nombre_bloque(int tipo)
     return "Desconocido";
 }
 
-static void pintar_con_pincel(int centro_x, int centro_y, int tipo)
+static void aplicar_herramienta_mundo(int centro_x, int centro_y, int modo_accion)
 {
     int r_ini = -(tamano_pincel - 1) / 2;
     int r_fin = tamano_pincel / 2;
+    static double t_aviso_sin_stock = 0.0;
+    static double t_ultimo_sonido = 0.0;
+    bool hubo_cambio = false;
+    int ult_tx = centro_x;
+    int ult_ty = centro_y;
 
     for (int dy = r_ini; dy <= r_fin; dy++) {
         for (int dx = r_ini; dx <= r_fin; dx++) {
             int tx = centro_x + dx;
             int ty = centro_y + dy;
-            if (tx > 0 && tx < MAP_WIDTH - 1 && ty > 0 && ty < MAP_HEIGHT - 1) {
-                if (tipo != 0 && tx == jugador_x && ty == jugador_y &&
-                    tabla_nodos[tipo].es_solido) {
+            if (tx <= 0 || tx >= MAP_WIDTH - 1 || ty <= 0 || ty >= MAP_HEIGHT - 1) continue;
+
+            int actual = obtener_casilla_mundo(tx, ty);
+
+            if (modo_accion == 0) {
+                if (actual != 0 && actual != 2) {
+                    int id_recurso = (actual == 11) ? 10 : actual;
+                    if (id_recurso > 0 && id_recurso < MAX_NODOS) {
+                        inventario[id_recurso]++;
+                    }
+                    establecer_casilla_mundo(tx, ty, 0);
+                    hubo_cambio = true;
+                } else if (actual == 2 && modo_creativo) {
+                    establecer_casilla_mundo(tx, ty, 0);
+                    hubo_cambio = true;
+                }
+            } else {
+                if (actual == bloque_seleccionado) continue;
+                if (tx == jugador_x && ty == jugador_y && tabla_nodos[bloque_seleccionado].es_solido) {
                     continue;
                 }
-                establecer_casilla_mundo(tx, ty, tipo);
+
+                if (!modo_creativo) {
+                    if (inventario[bloque_seleccionado] <= 0) {
+                        if (GetTime() - t_aviso_sin_stock > 1.2) {
+                            reproducir_sonido_motor(SONIDO_ALERTA);
+                            mostrar_notificacion_toast("¡Sin stock! Recolecta con Clic Izq o ve a 'Artesanía'.");
+                            t_aviso_sin_stock = GetTime();
+                        }
+                        return;
+                    }
+                    inventario[bloque_seleccionado]--;
+                }
+                establecer_casilla_mundo(tx, ty, bloque_seleccionado);
+                ult_tx = tx;
+                ult_ty = ty;
+                hubo_cambio = true;
             }
         }
     }
+
+    if (hubo_cambio) {
+        if (GetTime() - t_ultimo_sonido > 0.08) {
+            reproducir_sonido_motor(modo_accion == 0 ? SONIDO_MINAR : SONIDO_CONSTRUIR);
+            t_ultimo_sonido = GetTime();
+        }
+        // Si colocó una Semilla (13) o TNT (14), disparar evento al_colocar (Modo 3) en Latino
+        if (modo_accion == 1 && (bloque_seleccionado == 13 || bloque_seleccionado == 14)) {
+            ultimo_evento_x = ult_tx;
+            ultimo_evento_y = ult_ty;
+            ultimo_evento_id = bloque_seleccionado;
+            ejecutar_script_latino(3, 0, 0);
+        }
+    }
+}
+
+// Dispara el evento al_interactuar (Modo 4 en Latino) sobre Puertas (10/11), Semillas (13) o TNT (14)
+static void interactuar_con_entorno(int raton_tx, int raton_ty)
+{
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            int gx = jugador_x + dx;
+            int gy = jugador_y + dy;
+            int t = obtener_casilla_mundo(gx, gy);
+            if (t == 10 || (t == 11 && (dx != 0 || dy != 0)) || t == 13 || t == 14) {
+                ultimo_evento_x = gx;
+                ultimo_evento_y = gy;
+                ultimo_evento_id = t;
+                ejecutar_script_latino(4, 0, 0);
+                return;
+            }
+        }
+    }
+
+    if (raton_tx > 0 && raton_tx < MAP_WIDTH - 1 &&
+        raton_ty > 0 && raton_ty < MAP_HEIGHT - 1) {
+        int t = obtener_casilla_mundo(raton_tx, raton_ty);
+        if (t == 10 || t == 11 || t == 13 || t == 14) {
+            ultimo_evento_x = raton_tx;
+            ultimo_evento_y = raton_ty;
+            ultimo_evento_id = t;
+            ejecutar_script_latino(4, 0, 0);
+            return;
+        }
+    }
+
+    reproducir_sonido_motor(SONIDO_ALERTA);
+    mostrar_notificacion_toast("Acércate a una Puerta, Semilla o TNT para interactuar con [E].");
+}
+
+static float calcular_oscuridad_ambiental(float h)
+{
+    if (h >= 7.0f && h <= 17.5f) return 0.0f;
+    if (h > 17.5f && h < 20.5f)  return ((h - 17.5f) / 3.0f) * 0.84f;
+    if (h >= 20.5f || h <= 4.0f) return 0.84f;
+    return ((7.0f - h) / 3.0f) * 0.84f;
+}
+
+static Color aplicar_iluminacion_casilla(Color base, float oscuridad, float luz_local)
+{
+    if (oscuridad <= 0.01f) return base;
+
+    float sombra = oscuridad * (1.0f - luz_local);
+    if (sombra < 0.0f) sombra = 0.0f;
+    if (sombra > 0.88f) sombra = 0.88f;
+
+    float factor = 1.0f - sombra;
+    int r = (int)((float)base.r * factor + 28.0f * luz_local * oscuridad);
+    int g = (int)((float)base.g * factor + 16.0f * luz_local * oscuridad);
+    int b = (int)((float)base.b * (factor + 0.06f * oscuridad));
+
+    if (r > 255) r = 255;
+    if (g > 255) g = 255;
+    if (b > 255) b = 255;
+
+    return (Color){ (unsigned char)r, (unsigned char)g, (unsigned char)b, 255 };
 }
 
 int main(void)
@@ -900,19 +1737,29 @@ int main(void)
 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
 
-    InitWindow(1500, 940, "LatinoVox 2D & LatinoUI Studio v0.4 - Pestanas, Temas, Hotbar y Minimapa");
+    InitWindow(1540, 950, "LatinoVox 2D & LatinoUI v0.7 - Autómatas, Eventos y Editor UTF-8");
     if (!IsWindowReady()) {
         return 1;
     }
 
-    SetWindowMinSize(960, 680);
+    SetWindowMinSize(1024, 700);
     SetTargetFPS(60);
+
+    inicializar_fuente_utf8();
+    inicializar_audio_procedural();
+
+    agregar_log_consola("=== Consola Interactiva Latino (.lat) en Vivo ===");
+    agregar_log_consola("Usa las flechas Izquierda/Derecha para mover el cursor y pulsa [ENTER].");
+    cursor_consola_bytes = (int)strlen(entrada_consola);
 
     inicializar_mundo_con_latino(false);
 
     Camera2D camara = { 0 };
     camara.rotation = 0.0f;
     camara.zoom = 1.35f;
+
+    const int orden_hotbar[12] = { 1, 4, 8, 9, 10, 12, 13, 14, 5, 6, 7, 2 };
+    const char *etiqueta_tecla_hb[12] = { "1", "4", "8", "9", "0", "T", "Y", "U", "5", "6", "7", "2" };
 
     while (!WindowShouldClose()) {
         int screenWidth = GetScreenWidth();
@@ -925,6 +1772,41 @@ int main(void)
             if (tiempo_toast < 0.0f) tiempo_toast = 0.0f;
         }
 
+        if (ciclo_luz_auto && !modal_activo && !consola_activa) {
+            hora_dia += dt * 0.22f;
+            if (hora_dia >= 24.0f) hora_dia -= 24.0f;
+            WidgetUI *w_hora = buscar_widget_por_id(306);
+            if (w_hora != NULL && id_slider_arrastrando != 306) {
+                w_hora->valor = (int)hora_dia;
+            }
+        }
+
+        // --- TEMPORIZADOR DE CRECIMIENTO DE SEMILLAS Y TICK DEL GÓLEM (MODO 5) ---
+        for (int s = 0; s < MAX_SEMILLAS_ACTIVAS; s++) {
+            if (lista_semillas[s].activa) {
+                if (obtener_casilla_mundo(lista_semillas[s].gx, lista_semillas[s].gy) != 13) {
+                    lista_semillas[s].activa = false;
+                    continue;
+                }
+                lista_semillas[s].tiempo_restante -= dt;
+                if (lista_semillas[s].tiempo_restante <= 0.0f) {
+                    establecer_casilla_mundo(lista_semillas[s].gx, lista_semillas[s].gy, 4);
+                    lista_semillas[s].activa = false;
+                    reproducir_sonido_motor(SONIDO_CRAFT);
+                    mostrar_notificacion_toast("🌳 ¡Una Semilla ha madurado y ahora es un Árbol!");
+                }
+            }
+        }
+
+        temporizador_mundo_tick += dt;
+        if (temporizador_mundo_tick >= 0.45f) {
+            temporizador_mundo_tick = 0.0f;
+            if (golem_tarea > 0 && !modal_activo) {
+                generar_chunk_bajo_demanda(golem_x / CHUNK_SIZE, golem_y / CHUNK_SIZE);
+                ejecutar_script_latino(5, 0, 0);
+            }
+        }
+
         // --- VIGILANTE AUTO HOT-RELOAD ---
         temporizador_vigilancia += dt;
         if (temporizador_vigilancia >= 0.5f) {
@@ -934,82 +1816,93 @@ int main(void)
                 long mod_actual = GetFileModTime(ruta);
                 if (ultima_modificacion_script != 0 && mod_actual != ultima_modificacion_script) {
                     inicializar_mundo_con_latino(true);
-                    mostrar_notificacion_toast("Auto Hot-Reload: arranque.lat actualizado en vivo!");
+                    reproducir_sonido_motor(SONIDO_CRAFT);
+                    mostrar_notificacion_toast("¡Auto Hot-Reload: arranque.lat actualizado en vivo!");
                 }
             }
         }
 
-        float escala_ui = (float)screenWidth / 1400.0f;
+        float escala_ui = (float)screenWidth / 1440.0f;
         if (escala_ui < 1.0f) escala_ui = 1.0f;
-        if (escala_ui > 2.2f) escala_ui = 2.2f;
+        if (escala_ui > 2.0f) escala_ui = 2.0f;
 
-        int font_hud = (int)(22.0f * escala_ui) + ajuste_fuente;
-        if (font_hud < 16) font_hud = 16;
+        int font_hud = (int)(20.0f * escala_ui) + ajuste_fuente;
+        if (font_hud < 15) font_hud = 15;
 
         int sep_linea = font_hud + 8;
-        int alto_hud = sep_linea * 3 + 18;
+        int alto_hud = sep_linea * 3 + 16;
 
-        int ancho_panel_ui = (int)(400.0f * escala_ui);
+        int ancho_panel_ui = (int)(440.0f * escala_ui);
+        if (ancho_panel_ui > screenWidth / 2) ancho_panel_ui = screenWidth / 2;
+
         Rectangle rect_panel_ui = {
-            (float)(screenWidth - ancho_panel_ui - 14),
-            (float)(alto_hud + 14),
+            (float)(screenWidth - ancho_panel_ui - 12),
+            (float)(alto_hud + 12),
             (float)ancho_panel_ui,
-            (float)(screenHeight - alto_hud - 28)
+            (float)(screenHeight - alto_hud - 24)
         };
 
-        // Geometría de la Hotbar Inferior (Estilo Terraria / Luanti)
-        int slots_hotbar = 0;
-        int ids_hotbar[8];
-        for (int k = 1; k <= 7; k++) {
-            if (tabla_nodos[k].registrado) {
-                ids_hotbar[slots_hotbar++] = k;
-            }
-        }
-        int lado_slot = (int)(56.0f * escala_ui);
-        int ancho_hotbar = slots_hotbar * (lado_slot + 8) + 12;
+        int slots_hotbar = 12;
+        int lado_slot = (int)(50.0f * escala_ui);
+        int ancho_hotbar = slots_hotbar * (lado_slot + 5) + 14;
         int alto_hotbar = lado_slot + 16;
         int area_libre_w = mostrar_panel_ui ? (int)rect_panel_ui.x : screenWidth;
         Rectangle rect_hotbar = {
             (float)((area_libre_w - ancho_hotbar) / 2),
-            (float)(screenHeight - alto_hotbar - 14),
+            (float)(screenHeight - alto_hotbar - 12),
             (float)ancho_hotbar,
             (float)alto_hotbar
+        };
+
+        int w_con = area_libre_w - 60;
+        if (w_con < 480) w_con = 480;
+        int h_con = (int)(350.0f * escala_ui);
+        Rectangle rect_consola = {
+            (float)((area_libre_w - w_con) / 2),
+            (float)(screenHeight - alto_hotbar - h_con - 24),
+            (float)w_con,
+            (float)h_con
         };
 
         Vector2 pos_raton = GetMousePosition();
         bool raton_en_panel = mostrar_panel_ui && CheckCollisionPointRec(pos_raton, rect_panel_ui);
         bool raton_en_hotbar = CheckCollisionPointRec(pos_raton, rect_hotbar);
-        bool raton_sobre_gui = modal_activo || raton_en_panel || raton_en_hotbar || (pos_raton.y <= (float)alto_hud);
+        bool raton_en_consola = consola_activa && CheckCollisionPointRec(pos_raton, rect_consola);
+        bool raton_sobre_gui = modal_activo || raton_en_panel || raton_en_hotbar ||
+                               raton_en_consola || (pos_raton.y <= (float)alto_hud);
+
+        Vector2 pos_mundo_raton = GetScreenToWorld2D(pos_raton, camara);
+        int raton_tx = (int)(pos_mundo_raton.x / TILE_SIZE);
+        int raton_ty = (int)(pos_mundo_raton.y / TILE_SIZE);
+
+        if (IsKeyPressed(KEY_F3)) {
+            consola_activa = !consola_activa;
+            cursor_consola_bytes = (int)strlen(entrada_consola);
+            id_caja_activa = -1;
+            dir_mov_x = 0;
+            dir_mov_y = 0;
+            reproducir_sonido_motor(SONIDO_CLIC);
+        }
 
         // --- A. GESTIÓN DE VENTANA MODAL EMERGENTE ---
         if (modal_activo) {
             if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE) ||
                 IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                 modal_activo = false;
+                reproducir_sonido_motor(SONIDO_CLIC);
             }
         }
 
-        // --- B. ENTRADA DE TECLADO EN CAJA DE TEXTO ACTIVA ---
-        if (!modal_activo && id_caja_activa != -1) {
+        // --- B. EDICIÓN UTF-8 CON CURSOR EN CONSOLA [F3] O EN CAJA DE TEXTO ---
+        if (!modal_activo && consola_activa) {
+            procesar_edicion_utf8(entrada_consola, sizeof(entrada_consola), &cursor_consola_bytes);
+            if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER)) {
+                evaluar_comando_consola_latino(entrada_consola);
+            }
+        } else if (!modal_activo && id_caja_activa != -1) {
             WidgetUI *w_caja = buscar_widget_por_id(id_caja_activa);
             if (w_caja != NULL && w_caja->tipo == WIDGET_CAJA_TEXTO) {
-                int tecla_char = GetCharPressed();
-                while (tecla_char > 0) {
-                    if (tecla_char >= 32 && tecla_char <= 126) {
-                        size_t len = strlen(w_caja->texto);
-                        if (len + 1 < sizeof(w_caja->texto)) {
-                            w_caja->texto[len] = (char)tecla_char;
-                            w_caja->texto[len + 1] = '\0';
-                        }
-                    }
-                    tecla_char = GetCharPressed();
-                }
-
-                if (IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) {
-                    size_t len = strlen(w_caja->texto);
-                    if (len > 0) w_caja->texto[len - 1] = '\0';
-                }
-
+                procesar_edicion_utf8(w_caja->texto, sizeof(w_caja->texto), &cursor_caja_bytes);
                 if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER)) {
                     id_caja_activa = -1;
                 }
@@ -1019,15 +1912,20 @@ int main(void)
         }
 
         // --- C. ATAJOS DE SISTEMA ---
-        if (!modal_activo && id_caja_activa == -1) {
+        if (!modal_activo && !consola_activa && id_caja_activa == -1) {
             if (IsKeyPressed(KEY_R)) {
                 inicializar_mundo_con_latino(false);
+                reproducir_sonido_motor(SONIDO_CRAFT);
                 mostrar_notificacion_toast("Script recargado manualmente [R]");
             }
+            if (IsKeyPressed(KEY_E)) interactuar_con_entorno(raton_tx, raton_ty);
             if (IsKeyPressed(KEY_G)) guardar_mundo_disco();
             if (IsKeyPressed(KEY_C)) cargar_mundo_disco();
             if (IsKeyPressed(KEY_B)) mostrar_bordes_chunk = !mostrar_bordes_chunk;
-            if (IsKeyPressed(KEY_TAB)) mostrar_panel_ui = !mostrar_panel_ui;
+            if (IsKeyPressed(KEY_TAB)) {
+                mostrar_panel_ui = !mostrar_panel_ui;
+                reproducir_sonido_motor(SONIDO_CLIC);
+            }
             if (IsKeyPressed(KEY_F11)) ToggleFullscreen();
 
             if (IsKeyPressed(KEY_M)) {
@@ -1036,15 +1934,32 @@ int main(void)
                 dir_mov_y = 0;
             }
 
-            if (IsKeyPressed(KEY_F1) && ajuste_fuente > -6) ajuste_fuente -= 2;
-            if (IsKeyPressed(KEY_F2) && ajuste_fuente < 18) ajuste_fuente += 2;
+            if (IsKeyPressed(KEY_F1) && ajuste_fuente > -5) ajuste_fuente -= 1;
+            if (IsKeyPressed(KEY_F2) && ajuste_fuente < 10) ajuste_fuente += 1;
 
-            for (int k = 1; k <= 7; k++) {
+            for (int k = 1; k <= 9; k++) {
                 if (IsKeyPressed(KEY_ZERO + k) && tabla_nodos[k].registrado) {
                     bloque_seleccionado = k;
+                    reproducir_sonido_motor(SONIDO_CLIC);
                 }
             }
-        } else if (IsKeyPressed(KEY_TAB)) {
+            if (IsKeyPressed(KEY_ZERO) && tabla_nodos[10].registrado) {
+                bloque_seleccionado = 10;
+                reproducir_sonido_motor(SONIDO_CLIC);
+            }
+            if (IsKeyPressed(KEY_T) && tabla_nodos[12].registrado) {
+                bloque_seleccionado = 12;
+                reproducir_sonido_motor(SONIDO_CLIC);
+            }
+            if (IsKeyPressed(KEY_Y) && tabla_nodos[13].registrado) {
+                bloque_seleccionado = 13;
+                reproducir_sonido_motor(SONIDO_CLIC);
+            }
+            if (IsKeyPressed(KEY_U) && tabla_nodos[14].registrado) {
+                bloque_seleccionado = 14;
+                reproducir_sonido_motor(SONIDO_CLIC);
+            }
+        } else if (IsKeyPressed(KEY_TAB) && !consola_activa) {
             id_caja_activa = -1;
         }
 
@@ -1052,13 +1967,13 @@ int main(void)
         if (!modal_activo && raton_en_hotbar && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             for (int s = 0; s < slots_hotbar; s++) {
                 Rectangle r_slot = {
-                    rect_hotbar.x + 10.0f + (float)(s * (lado_slot + 8)),
+                    rect_hotbar.x + 10.0f + (float)(s * (lado_slot + 5)),
                     rect_hotbar.y + 8.0f,
                     (float)lado_slot,
                     (float)lado_slot
                 };
                 if (CheckCollisionPointRec(pos_raton, r_slot)) {
-                    bloque_seleccionado = ids_hotbar[s];
+                    bloque_seleccionado = orden_hotbar[s];
                     ultimo_evento_id = bloque_seleccionado;
                     ejecutar_script_latino(2, 0, 0);
                     break;
@@ -1072,15 +1987,14 @@ int main(void)
             if (raton_en_panel) {
                 scroll_panel_y += rueda * 36.0f;
                 if (scroll_panel_y > 0.0f) scroll_panel_y = 0.0f;
-            } else {
+            } else if (!raton_en_consola) {
                 camara.zoom += rueda * 0.15f;
             }
         }
 
-        if (!modal_activo && id_caja_activa == -1) {
+        if (!modal_activo && !consola_activa && id_caja_activa == -1) {
             if (IsKeyPressed(KEY_EQUAL) || IsKeyPressed(KEY_KP_ADD)) camara.zoom += 0.2f;
             if (IsKeyPressed(KEY_MINUS) || IsKeyPressed(KEY_KP_SUBTRACT)) camara.zoom -= 0.2f;
-            if (IsKeyPressed(KEY_ZERO)) camara.zoom = 1.35f;
         }
         if (camara.zoom < 0.35f) camara.zoom = 0.35f;
         if (camara.zoom > 4.0f)  camara.zoom = 4.0f;
@@ -1098,6 +2012,8 @@ int main(void)
             rect_panel_ui.height - (float)alto_cabecera_panel - 8.0f
         };
 
+        const char *acentos_es[10] = { "á", "é", "í", "ó", "ú", "ñ", "Ñ", "¡", "¿", "ü" };
+
         if (!modal_activo && mostrar_panel_ui) {
             if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !raton_en_panel) {
                 id_caja_activa = -1;
@@ -1107,7 +2023,6 @@ int main(void)
                 id_slider_arrastrando = -1;
             }
 
-            // Clic en la barra de Pestañas (Tabs)
             if (total_pestanas_ui > 0 && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                 float w_tab = (rect_panel_ui.width - 20.0f) / (float)total_pestanas_ui;
                 for (int t = 0; t < total_pestanas_ui; t++) {
@@ -1122,6 +2037,7 @@ int main(void)
                         pestana_actual = t;
                         scroll_panel_y = 0.0f;
                         id_caja_activa = -1;
+                        reproducir_sonido_motor(SONIDO_CLIC);
                         break;
                     }
                 }
@@ -1134,11 +2050,13 @@ int main(void)
                 WidgetUI *w = &widgets_ui[i];
                 if (!w->activo || w->pestana != pestana_actual) continue;
 
-                int alto_item = font_w + 20;
+                bool tiene_foco_caja = (w->tipo == WIDGET_CAJA_TEXTO && id_caja_activa == w->id);
+                int alto_item = font_w + 22;
                 if (w->tipo == WIDGET_ETIQUETA)   alto_item = font_w + 10;
-                if (w->tipo == WIDGET_CAJA_TEXTO) alto_item = (font_w * 2) + 24;
-                if (w->tipo == WIDGET_DESLIZADOR) alto_item = (font_w * 2) + 22;
-                if (w->tipo == WIDGET_PROGRESO)   alto_item = (font_w * 2) + 20;
+                if (w->tipo == WIDGET_CAJA_TEXTO) alto_item = (font_w * 2) + 26 + (tiene_foco_caja ? 30 : 0);
+                if (w->tipo == WIDGET_DESLIZADOR) alto_item = (font_w * 2) + 24;
+                if (w->tipo == WIDGET_PROGRESO)   alto_item = (font_w * 2) + 22;
+                if (w->tipo == WIDGET_INVENTARIO) alto_item = (font_w + 16) * 3 + 12;
 
                 Rectangle rect_item = {
                     rect_panel_ui.x + 14.0f,
@@ -1166,13 +2084,35 @@ int main(void)
                         break;
                     }
                 } else if (w->tipo == WIDGET_CAJA_TEXTO) {
-                    if (hover && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                        id_caja_activa = w->id;
+                    // Si está activa, comprobar clic en la barra rápida de tildes y ñ
+                    bool clic_en_chip = false;
+                    if (tiene_foco_caja && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                        float w_ch = (rect_item.width - 18.0f) / 10.0f;
+                        float y_ch = rect_item.y + (float)(font_w * 2) + 26.0f;
+                        for (int c = 0; c < 10; c++) {
+                            Rectangle r_ch = { rect_item.x + (float)c * (w_ch + 2.0f), y_ch, w_ch, 24.0f };
+                            if (CheckCollisionPointRec(pos_raton, r_ch)) {
+                                utf8_insertar_en_cursor(w->texto, sizeof(w->texto), &cursor_caja_bytes, acentos_es[c]);
+                                reproducir_sonido_motor(SONIDO_CLIC);
+                                clic_en_chip = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!clic_en_chip && hover && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                        if (id_caja_activa != w->id) {
+                            id_caja_activa = w->id;
+                            cursor_caja_bytes = (int)strlen(w->texto);
+                        }
+                        consola_activa = false;
+                        reproducir_sonido_motor(SONIDO_CLIC);
                     }
                 } else if (w->tipo == WIDGET_INTERRUPTOR) {
                     if (hover && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                         id_caja_activa = -1;
                         w->valor = (w->valor == 0) ? 1 : 0;
+                        reproducir_sonido_motor(SONIDO_CLIC);
                         ultimo_evento_id = w->id;
                         ejecutar_script_latino(2, 0, 0);
                         break;
@@ -1202,7 +2142,7 @@ int main(void)
         }
 
         // --- G. MOVIMIENTO DEL JUGADOR ---
-        if (!modal_activo && id_caja_activa == -1) {
+        if (!modal_activo && !consola_activa && id_caja_activa == -1) {
             if (modo_un_toque) {
                 if (IsKeyPressed(KEY_W) || IsKeyPressed(KEY_UP)) {
                     dir_mov_x = 0; dir_mov_y = -1; temporizador_paso = 1.0f;
@@ -1257,24 +2197,20 @@ int main(void)
             jugador_y * TILE_SIZE + TILE_SIZE / 2.0f
         };
 
-        // --- H. PINTADO EN EL MUNDO CON EL RATÓN ---
-        Vector2 pos_mundo_raton = GetScreenToWorld2D(pos_raton, camara);
-        int raton_tx = (int)(pos_mundo_raton.x / TILE_SIZE);
-        int raton_ty = (int)(pos_mundo_raton.y / TILE_SIZE);
-
+        // --- H. RECOLECCIÓN Y CONSTRUCCIÓN CON EL RATÓN ---
         if (!raton_sobre_gui && id_slider_arrastrando == -1 &&
             raton_tx > 0 && raton_tx < MAP_WIDTH - 1 &&
             raton_ty > 0 && raton_ty < MAP_HEIGHT - 1) {
             if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
                 id_caja_activa = -1;
-                pintar_con_pincel(raton_tx, raton_ty, 0);
+                aplicar_herramienta_mundo(raton_tx, raton_ty, 0);
             } else if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
                 id_caja_activa = -1;
-                pintar_con_pincel(raton_tx, raton_ty, bloque_seleccionado);
+                aplicar_herramienta_mundo(raton_tx, raton_ty, 1);
             }
         }
 
-        // --- I. VIEW CULLING Y RENDERIZADO DEL MUNDO ---
+        // --- I. VIEW CULLING E ILUMINACIÓN DINÁMICA 2D ---
         Vector2 esq_sup_izq = GetScreenToWorld2D((Vector2){ 0, 0 }, camara);
         Vector2 esq_inf_der = GetScreenToWorld2D((Vector2){ (float)screenWidth, (float)screenHeight }, camara);
 
@@ -1288,8 +2224,32 @@ int main(void)
         if (max_x >= MAP_WIDTH)  max_x = MAP_WIDTH - 1;
         if (max_y >= MAP_HEIGHT) max_y = MAP_HEIGHT - 1;
 
+        float oscuridad = calcular_oscuridad_ambiental(hora_dia);
+
+        FuenteLuz luces[MAX_LUCES_VISIBLES];
+        int total_luces = 0;
+
+        if (oscuridad > 0.01f) {
+            luces[total_luces++] = (FuenteLuz){ jugador_x, jugador_y, 4 };
+            luces[total_luces++] = (FuenteLuz){ golem_x, golem_y, 4 }; // El Gólem también ilumina
+
+            int l_min_x = (min_x - 7 < 0) ? 0 : min_x - 7;
+            int l_min_y = (min_y - 7 < 0) ? 0 : min_y - 7;
+            int l_max_x = (max_x + 7 >= MAP_WIDTH)  ? MAP_WIDTH - 1  : max_x + 7;
+            int l_max_y = (max_y + 7 >= MAP_HEIGHT) ? MAP_HEIGHT - 1 : max_y + 7;
+
+            for (int ly = l_min_y; ly <= l_max_y && total_luces < MAX_LUCES_VISIBLES; ly++) {
+                for (int lx = l_min_x; lx <= l_max_x && total_luces < MAX_LUCES_VISIBLES; lx++) {
+                    int t = obtener_casilla_mundo(lx, ly);
+                    if (t >= 0 && t < MAX_NODOS && tabla_nodos[t].radio_luz > 0) {
+                        luces[total_luces++] = (FuenteLuz){ lx, ly, tabla_nodos[t].radio_luz };
+                    }
+                }
+            }
+        }
+
         BeginDrawing();
-        ClearBackground((Color){ 18, 22, 28, 255 });
+        ClearBackground((Color){ 12, 15, 22, 255 });
 
         BeginMode2D(camara);
 
@@ -1301,21 +2261,76 @@ int main(void)
                 int py = gy * TILE_SIZE;
 
                 if (!mundo[cy][cx].generado) {
-                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, (Color){ 30, 35, 45, 255 });
+                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, (Color){ 20, 24, 32, 255 });
                     continue;
                 }
 
+                float luz_local = 0.0f;
+                if (oscuridad > 0.01f) {
+                    for (int l = 0; l < total_luces; l++) {
+                        int dx = gx - luces[l].gx;
+                        int dy = gy - luces[l].gy;
+                        int r_max = luces[l].radio;
+                        if (abs(dx) <= r_max && abs(dy) <= r_max) {
+                            float dist = sqrtf((float)(dx * dx + dy * dy));
+                            if (dist < (float)r_max) {
+                                float aporte = 1.0f - (dist / (float)r_max);
+                                if (aporte > luz_local) luz_local = aporte;
+                            }
+                        }
+                    }
+                }
+
                 int tipo = obtener_casilla_mundo(gx, gy);
-                Color color_base = tabla_nodos[0].color;
+                Color color_pasto = aplicar_iluminacion_casilla(tabla_nodos[0].color, oscuridad, luz_local);
+                Color color_nodo = color_pasto;
                 if (tipo >= 0 && tipo < MAX_NODOS && tabla_nodos[tipo].registrado) {
-                    color_base = tabla_nodos[tipo].color;
+                    color_nodo = aplicar_iluminacion_casilla(tabla_nodos[tipo].color, oscuridad, luz_local);
                 }
 
                 if (tipo == 3 || tipo == 4) {
-                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, tabla_nodos[0].color);
-                    DrawRectangle(px + 10, py + 10, TILE_SIZE - 20, TILE_SIZE - 20, color_base);
+                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_pasto);
+                    DrawRectangle(px + 10, py + 10, TILE_SIZE - 20, TILE_SIZE - 20, color_nodo);
+                } else if (tipo == 8) {
+                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_nodo);
+                    Color c_veta = aplicar_iluminacion_casilla((Color){ 135, 90, 45, 255 }, oscuridad, luz_local);
+                    DrawLine(px, py + 16, px + TILE_SIZE, py + 16, c_veta);
+                    DrawLine(px, py + 32, px + TILE_SIZE, py + 32, c_veta);
+                } else if (tipo == 9) {
+                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_nodo);
+                    Color c_junta = aplicar_iluminacion_casilla((Color){ 210, 195, 185, 255 }, oscuridad, luz_local);
+                    DrawLine(px, py + 24, px + TILE_SIZE, py + 24, c_junta);
+                    DrawLine(px + 24, py, px + 24, py + 24, c_junta);
+                    DrawLine(px + 12, py + 24, px + 12, py + TILE_SIZE, c_junta);
+                } else if (tipo == 10) {
+                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_pasto);
+                    DrawRectangle(px + 4, py + 14, TILE_SIZE - 8, TILE_SIZE - 28, color_nodo);
+                    DrawRectangleLines(px + 4, py + 14, TILE_SIZE - 8, TILE_SIZE - 28, BLACK);
+                    DrawCircle(px + TILE_SIZE - 12, py + TILE_SIZE / 2, 3.0f, GOLD);
+                } else if (tipo == 11) {
+                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_pasto);
+                    DrawRectangle(px + 4, py + 4, 12, TILE_SIZE - 8, color_nodo);
+                    DrawRectangleLines(px + 4, py + 4, 12, TILE_SIZE - 8, GOLD);
+                } else if (tipo == 12) {
+                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_pasto);
+                    DrawRectangle(px + 21, py + 22, 6, 16, BROWN);
+                    float pulso = 7.0f + sinf((float)GetTime() * 8.0f + (float)(gx + gy)) * 1.5f;
+                    DrawCircle(px + 24, py + 18, pulso, (Color){ 255, 140, 20, 220 });
+                    DrawCircle(px + 24, py + 18, pulso * 0.55f, YELLOW);
+                } else if (tipo == 13) {
+                    // Semilla / Brote de árbol en crecimiento
+                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_pasto);
+                    DrawRectangle(px + 22, py + 24, 4, 14, BROWN);
+                    DrawCircle(px + 20, py + 22, 6.0f, color_nodo);
+                    DrawCircle(px + 28, py + 22, 6.0f, LIME);
+                } else if (tipo == 14) {
+                    // Dinamita TNT
+                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_pasto);
+                    DrawRectangle(px + 8, py + 8, TILE_SIZE - 16, TILE_SIZE - 16, color_nodo);
+                    DrawRectangle(px + 8, py + 20, TILE_SIZE - 16, 8, RAYWHITE);
+                    DrawCircle(px + 24, py + 6, 3.5f, ((int)(GetTime() * 6.0) % 2 == 0) ? YELLOW : ORANGE);
                 } else {
-                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_base);
+                    DrawRectangle(px, py, TILE_SIZE, TILE_SIZE, color_nodo);
                 }
             }
         }
@@ -1345,6 +2360,16 @@ int main(void)
             DrawRectangleLinesEx((Rectangle){ (float)px_ini, (float)py_ini, (float)lado_px, (float)lado_px }, 2.5f, YELLOW);
         }
 
+        // Dibujar el Autómata Gólem (Robot Constructor Cian)
+        int gpx = golem_x * TILE_SIZE;
+        int gpy = golem_y * TILE_SIZE;
+        DrawRectangle(gpx + 8, gpy + 10, TILE_SIZE - 16, TILE_SIZE - 14, (Color){ 40, 175, 225, 255 });
+        DrawRectangleLines(gpx + 8, gpy + 10, TILE_SIZE - 16, TILE_SIZE - 14, WHITE);
+        DrawRectangle(gpx + 13, gpy + 16, TILE_SIZE - 26, 8, YELLOW); // Visor LED
+        DrawLine(gpx + TILE_SIZE / 2, gpy + 2, gpx + TILE_SIZE / 2, gpy + 10, SKYBLUE);
+        DrawCircle(gpx + TILE_SIZE / 2, gpy + 3, 3.5f, (golem_tarea > 0) ? GREEN : RED);
+
+        // Dibujar Jugador
         DrawCircle(
             jugador_x * TILE_SIZE + TILE_SIZE / 2,
             jugador_y * TILE_SIZE + TILE_SIZE / 2,
@@ -1354,47 +2379,57 @@ int main(void)
 
         EndMode2D();
 
-        // --- J. HUD SUPERIOR ---
+        // --- J. HUD SUPERIOR CON AUTOAJUSTE DE LÍNEA ---
         int j_cx = jugador_x / CHUNK_SIZE;
         int j_cy = jugador_y / CHUNK_SIZE;
+        int hora_ent = (int)hora_dia;
+        int min_ent = (int)((hora_dia - (float)hora_ent) * 60.0f);
+        const char *nombres_tarea[4] = { "Espera", "Siguiendo", "Leñador/Minero", "Constructor" };
 
         DrawRectangle(0, 0, screenWidth, alto_hud, tema.fondo_panel);
         DrawLine(0, alto_hud, screenWidth, alto_hud, tema.borde_panel);
 
-        DrawText(
-            id_caja_activa != -1
-                ? "MODO ESCRITURA ACTIVO: Escribe con tu teclado | [ENTER] o Clic fuera para terminar"
-                : "WASD: Caminar | [ESPACIO] Parar | [TAB] Panel GUI | Clic en Pestanas o Hotbar | [G/C] Guardar",
-            20, 10, font_hud, (id_caja_activa != -1) ? GOLD : tema.texto_normal
-        );
-        DrawText(
-            TextFormat("FPS: %d | Pos: (%d,%d) Chunk: (%d,%d) | Semilla: %d | Chunks: %d/256 | VM: %.2f ms",
-                       GetFPS(), jugador_x, jugador_y, j_cx, j_cy,
-                       semilla_mundo, total_chunks_generados, ultimo_tiempo_vm_ms),
-            20, 10 + sep_linea, font_hud, (tema_actual == 1) ? DARKGREEN : GREEN
-        );
-        DrawText(
-            TextFormat("Bloque: [%d:%s] | Pincel: %dx%d | Estado: %s",
-                       bloque_seleccionado, nombre_bloque(bloque_seleccionado),
-                       tamano_pincel, tamano_pincel, estado_sistema),
-            20, 10 + sep_linea * 2, font_hud, tema.texto_etiqueta
+        Rectangle r_hud1 = { 14.0f, 6.0f, (float)(screenWidth - 28), (float)sep_linea };
+        Rectangle r_hud2 = { 14.0f, (float)(6 + sep_linea), (float)(screenWidth - 28), (float)sep_linea };
+        Rectangle r_hud3 = { 14.0f, (float)(6 + sep_linea * 2), (float)(screenWidth - 28), (float)sep_linea };
+
+        dibujar_texto_ajustado(
+            (id_caja_activa != -1 || consola_activa)
+                ? "MODO EDICIÓN UTF-8: Usa Flechas [Izq/Der] para mover el cursor | [ENTER] Aceptar | Barra inferior: áéíóúñ"
+                : "WASD: Caminar | Clic Izq: Minar | Clic Der: Construir | [E] Puerta/TNT/Semilla | [F3] Consola .lat",
+            r_hud1, font_hud, false, (id_caja_activa != -1 || consola_activa) ? GOLD : tema.texto_normal
         );
 
-        // --- K. MINIMAPA 2D EN VIVO ( ABAJO A LA IZQUIERDA ) ---
-        if (mostrar_minimapa) {
-            int map_px = 192; // 64x64 bloques alrededor o mundo 256x256 a escala
-            int x_mm = 18;
-            int y_mm = screenHeight - map_px - 18;
+        dibujar_texto_ajustado(
+            TextFormat("FPS: %d | Pos: (%d,%d) | Gólem: (%d,%d) [%s] | Reloj: %02d:%02d | VM: %.2f ms",
+                       GetFPS(), jugador_x, jugador_y, golem_x, golem_y,
+                       nombres_tarea[golem_tarea % 4], hora_ent, min_ent, ultimo_tiempo_vm_ms),
+            r_hud2, font_hud, false, (tema_actual == 1) ? DARKGREEN : GREEN
+        );
+
+        dibujar_texto_ajustado(
+            TextFormat("Mano: [%s] Stock: %s | Audio: %s | %s",
+                       nombre_bloque(bloque_seleccionado),
+                       modo_creativo ? "Infinito" : TextFormat("x%d", inventario[bloque_seleccionado]),
+                       audio_activo ? "ON" : "MUTE",
+                       estado_sistema),
+            r_hud3, font_hud, false, tema.texto_etiqueta
+        );
+
+        // --- K. MINIMAPA 2D EN VIVO ---
+        if (mostrar_minimapa && !consola_activa) {
+            int map_px = 180;
+            int x_mm = 16;
+            int y_mm = screenHeight - map_px - 16;
 
             DrawRectangle(x_mm - 4, y_mm - 28, map_px + 8, map_px + 32, tema.fondo_panel);
             DrawRectangleLines(x_mm - 4, y_mm - 28, map_px + 8, map_px + 32, tema.borde_panel);
-            DrawText("Minimapa Chunks", x_mm + 6, y_mm - 24, 18, tema.texto_titulo);
+            dibujar_texto_ui("Minimapa 2D", x_mm + 6, y_mm - 24, 17, tema.texto_titulo);
 
-            // Dibujar cada casilla generada (paso 2 para cubrir 256x256 en 128x128 o escala 3/4)
-            for (int my = 0; my < 64; my++) {
-                for (int mx = 0; mx < 64; mx++) {
-                    int gx = mx * 4;
-                    int gy = my * 4;
+            for (int my = 0; my < 60; my++) {
+                for (int mx = 0; mx < 60; mx++) {
+                    int gx = (mx * MAP_WIDTH) / 60;
+                    int gy = (my * MAP_HEIGHT) / 60;
                     int cx = gx / CHUNK_SIZE;
                     int cy = gy / CHUNK_SIZE;
                     Color cm = (Color){ 30, 35, 45, 255 };
@@ -1405,21 +2440,24 @@ int main(void)
                     DrawRectangle(x_mm + mx * 3, y_mm + my * 3, 3, 3, cm);
                 }
             }
-            // Posición del jugador en el minimapa
-            int j_mx = x_mm + (jugador_x * 3) / 4;
-            int j_my = y_mm + (jugador_y * 3) / 4;
+            int g_mx = x_mm + (golem_x * map_px) / MAP_WIDTH;
+            int g_my = y_mm + (golem_y * map_px) / MAP_HEIGHT;
+            DrawCircle(g_mx, g_my, 3.5f, SKYBLUE);
+
+            int j_mx = x_mm + (jugador_x * map_px) / MAP_WIDTH;
+            int j_my = y_mm + (jugador_y * map_px) / MAP_HEIGHT;
             DrawCircle(j_mx, j_my, 4.0f, RED);
             DrawCircleLines(j_mx, j_my, 5.0f, WHITE);
         }
 
-        // --- L. BARRA RÁPIDA DE HERRAMIENTAS (HOTBAR ESTILO TERRARIA / LUANTI) ---
+        // --- L. BARRA RÁPIDA DE HERRAMIENTAS (HOTBAR) ---
         DrawRectangleRec(rect_hotbar, tema.fondo_panel);
         DrawRectangleLinesEx(rect_hotbar, 2.0f, tema.borde_panel);
 
         for (int s = 0; s < slots_hotbar; s++) {
-            int id_b = ids_hotbar[s];
+            int id_b = orden_hotbar[s];
             Rectangle r_slot = {
-                rect_hotbar.x + 10.0f + (float)(s * (lado_slot + 8)),
+                rect_hotbar.x + 10.0f + (float)(s * (lado_slot + 5)),
                 rect_hotbar.y + 8.0f,
                 (float)lado_slot,
                 (float)lado_slot
@@ -1430,29 +2468,36 @@ int main(void)
             DrawRectangleRec(r_slot, tabla_nodos[id_b].color);
             DrawRectangleLinesEx(r_slot, activo ? 3.5f : 1.5f,
                                  activo ? GOLD : (hover_s ? WHITE : DARKGRAY));
-            DrawText(TextFormat("%d", id_b), (int)r_slot.x + 5, (int)r_slot.y + 4, 18, BLACK);
-            DrawText(TextFormat("%d", id_b), (int)r_slot.x + 4, (int)r_slot.y + 3, 18, WHITE);
+
+            dibujar_texto_ui(etiqueta_tecla_hb[s], (int)r_slot.x + 5, (int)r_slot.y + 2, 14, BLACK);
+            dibujar_texto_ui(etiqueta_tecla_hb[s], (int)r_slot.x + 4, (int)r_slot.y + 1, 14, WHITE);
+
+            const char *txt_cant = modo_creativo ? "Inf" : TextFormat("x%d", inventario[id_b]);
+            Rectangle r_cant = { r_slot.x + 2.0f, r_slot.y + r_slot.height - 18.0f, r_slot.width - 4.0f, 16.0f };
+            DrawRectangleRec(r_cant, (Color){ 0, 0, 0, 180 });
+            dibujar_texto_ajustado(txt_cant, r_cant, 14, true,
+                                   (inventario[id_b] > 0 || modo_creativo) ? YELLOW : RED);
         }
 
-        // --- M. PANEL LATERAL FRONTEND GUI CON PESTAÑAS Y SCROLL ---
+        // --- M. PANEL LATERAL FRONTEND GUI ---
         if (mostrar_panel_ui) {
             DrawRectangleRec(rect_panel_ui, tema.fondo_panel);
             DrawRectangleLinesEx(rect_panel_ui, 2.0f, tema.borde_panel);
 
-            DrawText(titulo_ui, (int)rect_panel_ui.x + 16, (int)rect_panel_ui.y + 10, font_hud, tema.texto_titulo);
+            Rectangle r_tit_panel = { rect_panel_ui.x + 10.0f, rect_panel_ui.y + 6.0f, rect_panel_ui.width - 20.0f, (float)alto_titulo_panel };
+            dibujar_texto_ajustado(titulo_ui, r_tit_panel, font_hud, false, tema.texto_titulo);
 
-            // Barra de Pestañas (Tabs)
             if (total_pestanas_ui > 0) {
                 float w_tab = (rect_panel_ui.width - 20.0f) / (float)total_pestanas_ui;
                 int f_tab = font_hud - 4;
-                if (f_tab < 15) f_tab = 15;
+                if (f_tab < 12) f_tab = 12;
 
                 for (int t = 0; t < total_pestanas_ui; t++) {
                     if (!pestanas_ui[t].activa) continue;
                     Rectangle r_tab = {
                         rect_panel_ui.x + 10.0f + (float)t * w_tab,
                         rect_panel_ui.y + (float)alto_titulo_panel,
-                        w_tab - 4.0f,
+                        w_tab - 3.0f,
                         (float)alto_barra_tabs
                     };
                     bool es_actual = (pestana_actual == t);
@@ -1460,11 +2505,8 @@ int main(void)
 
                     DrawRectangleRec(r_tab, es_actual ? tema.borde_panel : tema.fondo_widget);
                     DrawRectangleLinesEx(r_tab, 1.5f, (es_actual || hover_t) ? GOLD : tema.borde_panel);
-                    DrawText(
-                        pestanas_ui[t].titulo,
-                        (int)r_tab.x + 8,
-                        (int)r_tab.y + (alto_barra_tabs - f_tab) / 2,
-                        f_tab,
+                    dibujar_texto_ajustado(
+                        pestanas_ui[t].titulo, r_tab, f_tab, true,
                         es_actual ? BLACK : tema.texto_normal
                     );
                 }
@@ -1484,11 +2526,13 @@ int main(void)
                 WidgetUI *w = &widgets_ui[i];
                 if (!w->activo || w->pestana != pestana_actual) continue;
 
-                int alto_item = font_w + 20;
+                bool tiene_foco_caja = (w->tipo == WIDGET_CAJA_TEXTO && id_caja_activa == w->id);
+                int alto_item = font_w + 22;
                 if (w->tipo == WIDGET_ETIQUETA)   alto_item = font_w + 10;
-                if (w->tipo == WIDGET_CAJA_TEXTO) alto_item = (font_w * 2) + 24;
-                if (w->tipo == WIDGET_DESLIZADOR) alto_item = (font_w * 2) + 22;
-                if (w->tipo == WIDGET_PROGRESO)   alto_item = (font_w * 2) + 20;
+                if (w->tipo == WIDGET_CAJA_TEXTO) alto_item = (font_w * 2) + 26 + (tiene_foco_caja ? 30 : 0);
+                if (w->tipo == WIDGET_DESLIZADOR) alto_item = (font_w * 2) + 24;
+                if (w->tipo == WIDGET_PROGRESO)   alto_item = (font_w * 2) + 22;
+                if (w->tipo == WIDGET_INVENTARIO) alto_item = (font_w + 16) * 3 + 12;
 
                 Rectangle rect_item = {
                     rect_panel_ui.x + 14.0f,
@@ -1497,11 +2541,38 @@ int main(void)
                     (float)alto_item
                 };
 
-                bool hover = CheckCollisionPointRec(pos_raton, area_scroll_ui) &&
+                bool visible = (rect_item.y + rect_item.height >= area_scroll_ui.y) &&
+                               (rect_item.y <= area_scroll_ui.y + area_scroll_ui.height);
+
+                bool hover = visible && CheckCollisionPointRec(pos_raton, area_scroll_ui) &&
                              CheckCollisionPointRec(pos_raton, rect_item);
 
                 if (w->tipo == WIDGET_ETIQUETA) {
-                    DrawText(w->etiqueta, (int)rect_item.x + 4, (int)rect_item.y + 4, font_w, tema.texto_etiqueta);
+                    dibujar_texto_ajustado(w->etiqueta, rect_item, font_w, false, tema.texto_etiqueta);
+                } else if (w->tipo == WIDGET_INVENTARIO) {
+                    DrawRectangleRec(rect_item, tema.fondo_widget);
+                    DrawRectangleLinesEx(rect_item, 1.5f, tema.borde_panel);
+
+                    const int ids_mostrar[9] = { 4, 1, 6, 8, 9, 10, 12, 13, 14 };
+                    int col_w = (int)(rect_item.width - 16.0f) / 3;
+                    int fila_h = font_w + 14;
+
+                    for (int m = 0; m < 9; m++) {
+                        int id_m = ids_mostrar[m];
+                        int col = m % 3;
+                        int fila = m / 3;
+                        int ix = (int)rect_item.x + 8 + col * col_w;
+                        int iy = (int)rect_item.y + 8 + fila * fila_h;
+
+                        DrawRectangle(ix, iy + 2, 16, 16, tabla_nodos[id_m].color);
+                        DrawRectangleLines(ix, iy + 2, 16, 16, WHITE);
+                        Rectangle r_celda = { (float)(ix + 20), (float)iy, (float)(col_w - 22), (float)fila_h };
+                        dibujar_texto_ajustado(
+                            TextFormat("%s:%d", tabla_nodos[id_m].nombre, inventario[id_m]),
+                            r_celda, font_w - 4, false,
+                            (inventario[id_m] > 0) ? tema.texto_normal : GRAY
+                        );
+                    }
                 } else if (w->tipo == WIDGET_BOTON) {
                     bool seleccionado = (w->id == bloque_seleccionado);
                     Color c_fondo = w->color;
@@ -1513,43 +2584,51 @@ int main(void)
                     DrawRectangleRec(rect_item, c_fondo);
                     DrawRectangleLinesEx(rect_item, seleccionado ? 3.0f : 1.5f,
                                          (hover || seleccionado) ? GOLD : RAYWHITE);
-                    DrawText(w->etiqueta,
-                             (int)rect_item.x + 12,
-                             (int)rect_item.y + (alto_item - font_w) / 2,
-                             font_w, RAYWHITE);
+                    dibujar_texto_ajustado(w->etiqueta, rect_item, font_w, false, RAYWHITE);
                 } else if (w->tipo == WIDGET_CAJA_TEXTO) {
-                    bool tiene_foco = (id_caja_activa == w->id);
-                    DrawText(w->etiqueta, (int)rect_item.x + 4, (int)rect_item.y + 2, font_w - 2, tema.texto_normal);
+                    Rectangle r_lbl = { rect_item.x, rect_item.y, rect_item.width, (float)font_w + 4.0f };
+                    dibujar_texto_ajustado(w->etiqueta, r_lbl, font_w - 2, false, tema.texto_normal);
 
                     Rectangle rect_caja = {
                         rect_item.x,
                         rect_item.y + (float)font_w + 4.0f,
                         rect_item.width,
-                        (float)font_w + 16.0f
+                        (float)font_w + 18.0f
                     };
                     DrawRectangleRec(rect_caja, tema.fondo_widget);
-                    DrawRectangleLinesEx(rect_caja, tiene_foco ? 2.5f : 1.5f,
-                                         tiene_foco ? GOLD : (hover ? tema.borde_panel : GRAY));
+                    DrawRectangleLinesEx(rect_caja, tiene_foco_caja ? 2.5f : 1.5f,
+                                         tiene_foco_caja ? GOLD : (hover ? tema.borde_panel : GRAY));
 
-                    bool parpadeo = tiene_foco && (((int)(GetTime() * 2.0)) % 2 == 0);
-                    DrawText(
-                        parpadeo ? TextFormat("%s|", w->texto) : w->texto,
-                        (int)rect_caja.x + 10,
-                        (int)rect_caja.y + 8,
-                        font_w,
-                        tiene_foco ? GOLD : tema.texto_normal
+                    bool parpadeo = tiene_foco_caja && (((int)(GetTime() * 2.5)) % 2 == 0);
+                    char vista_cursor[160];
+                    construir_texto_con_cursor(w->texto, cursor_caja_bytes, tiene_foco_caja && parpadeo, vista_cursor, sizeof(vista_cursor));
+
+                    dibujar_texto_ajustado(
+                        vista_cursor, rect_caja, font_w - 1, false,
+                        tiene_foco_caja ? GOLD : tema.texto_normal
                     );
+
+                    // Barra rápida de tildes y ñ cuando la caja tiene el foco
+                    if (tiene_foco_caja) {
+                        float w_ch = (rect_item.width - 18.0f) / 10.0f;
+                        float y_ch = rect_item.y + (float)(font_w * 2) + 26.0f;
+                        for (int c = 0; c < 10; c++) {
+                            Rectangle r_ch = { rect_item.x + (float)c * (w_ch + 2.0f), y_ch, w_ch, 24.0f };
+                            bool hov_ch = CheckCollisionPointRec(pos_raton, r_ch);
+                            DrawRectangleRec(r_ch, hov_ch ? (Color){ 65, 105, 160, 255 } : (Color){ 35, 45, 65, 255 });
+                            DrawRectangleLinesEx(r_ch, 1.0f, hov_ch ? GOLD : SKYBLUE);
+                            dibujar_texto_ajustado(acentos_es[c], r_ch, font_w - 3, true, WHITE);
+                        }
+                    }
                 } else if (w->tipo == WIDGET_DESLIZADOR) {
-                    DrawText(
+                    Rectangle r_lbl = { rect_item.x, rect_item.y, rect_item.width, (float)font_w + 4.0f };
+                    dibujar_texto_ajustado(
                         TextFormat("%s: %d", w->etiqueta, w->valor),
-                        (int)rect_item.x + 4,
-                        (int)rect_item.y + 2,
-                        font_w - 2,
-                        tema.texto_normal
+                        r_lbl, font_w - 2, false, tema.texto_normal
                     );
 
                     float barra_x = rect_item.x + 10.0f;
-                    float barra_y = rect_item.y + (float)font_w + 12.0f;
+                    float barra_y = rect_item.y + (float)font_w + 13.0f;
                     float barra_w = rect_item.width - 20.0f;
                     float ratio = (float)(w->valor - w->min_val) / (float)(w->max_val - w->min_val);
 
@@ -1561,37 +2640,33 @@ int main(void)
                     DrawRectangleRec(rect_item, tema.fondo_widget);
                     DrawRectangleLinesEx(rect_item, 1.5f, hover ? GOLD : tema.borde_panel);
 
-                    DrawText(w->etiqueta,
-                             (int)rect_item.x + 10,
-                             (int)rect_item.y + (alto_item - font_w) / 2,
-                             font_w - 2, tema.texto_normal);
+                    Rectangle r_lbl = { rect_item.x + 4.0f, rect_item.y, rect_item.width - 74.0f, rect_item.height };
+                    dibujar_texto_ajustado(w->etiqueta, r_lbl, font_w - 2, false, tema.texto_normal);
 
                     Rectangle sw_box = {
-                        rect_item.x + rect_item.width - 66.0f,
-                        rect_item.y + (rect_item.height - 26.0f) / 2.0f,
-                        54.0f,
-                        26.0f
+                        rect_item.x + rect_item.width - 64.0f,
+                        rect_item.y + (rect_item.height - 24.0f) / 2.0f,
+                        52.0f,
+                        24.0f
                     };
                     DrawRectangleRec(sw_box, encendido ? (Color){ 45, 165, 85, 255 } : (Color){ 90, 95, 105, 255 });
                     DrawCircle(
-                        (int)(encendido ? sw_box.x + sw_box.width - 13.0f : sw_box.x + 13.0f),
-                        (int)(sw_box.y + 13.0f),
-                        10.0f, RAYWHITE
+                        (int)(encendido ? sw_box.x + sw_box.width - 12.0f : sw_box.x + 12.0f),
+                        (int)(sw_box.y + 12.0f),
+                        9.0f, RAYWHITE
                     );
                 } else if (w->tipo == WIDGET_PROGRESO) {
                     int pct = (w->valor * 100) / w->max_val;
-                    DrawText(
+                    Rectangle r_lbl = { rect_item.x, rect_item.y, rect_item.width, (float)font_w + 4.0f };
+                    dibujar_texto_ajustado(
                         TextFormat("%s: %d / %d (%d%%)", w->etiqueta, w->valor, w->max_val, pct),
-                        (int)rect_item.x + 4,
-                        (int)rect_item.y + 2,
-                        font_w - 2,
-                        tema.texto_normal
+                        r_lbl, font_w - 2, false, tema.texto_normal
                     );
                     Rectangle r_bar = {
                         rect_item.x + 4.0f,
                         rect_item.y + (float)font_w + 6.0f,
                         rect_item.width - 8.0f,
-                        18.0f
+                        16.0f
                     };
                     float ratio = (float)w->valor / (float)w->max_val;
                     if (ratio < 0.0f) ratio = 0.0f;
@@ -1608,80 +2683,191 @@ int main(void)
             EndScissorMode();
         }
 
-        // --- N. NOTIFICACIÓN FLOTANTE (TOAST UX) ---
+        // --- N. CONSOLA .LAT INTERACTIVA IN-GAME [F3] CON BARRA UTF-8 Y CURSOR ---
+        if (consola_activa) {
+            DrawRectangleRec(rect_consola, (Color){ 10, 14, 22, 246 });
+            DrawRectangleLinesEx(rect_consola, 2.5f, GOLD);
+
+            Rectangle r_tit_con = { rect_consola.x + 12.0f, rect_consola.y + 6.0f, rect_consola.width - 24.0f, (float)font_hud + 8.0f };
+            dibujar_texto_ajustado(
+                "Consola .lat en Vivo (Flechas [Izq/Der] mueven el cursor | [ENTER] Ejecutar | [F3] Cerrar)",
+                r_tit_con, font_hud - 2, false, GOLD
+            );
+            DrawLine((int)rect_consola.x + 12, (int)rect_consola.y + font_hud + 16,
+                     (int)(rect_consola.x + rect_consola.width - 12), (int)rect_consola.y + font_hud + 16, SKYBLUE);
+
+            const char *chips_txt[4] = {
+                "1: Mensaje con ñ/tildes",
+                "2: Llamar al Gólem",
+                "3: Gólem Leñador",
+                "4: +10 Semillas y TNT"
+            };
+            const char *chips_cmd[4] = {
+                "motor.notificar(\"¡Ejecución en español con ñ y áéíóú!\")",
+                "motor.golem_colocar(motor.jugador_x() + 1, motor.jugador_y())",
+                "motor.golem_fijar_tarea(2)",
+                "motor.inv_agregar(13, 10) motor.inv_agregar(14, 10)"
+            };
+
+            float w_chip = (rect_consola.width - 36.0f) / 4.0f;
+            float y_chip = rect_consola.y + (float)font_hud + 22.0f;
+            for (int c = 0; c < 4; c++) {
+                Rectangle r_chip = { rect_consola.x + 12.0f + (float)c * (w_chip + 4.0f), y_chip, w_chip, (float)font_hud + 10.0f };
+                bool hov_c = CheckCollisionPointRec(pos_raton, r_chip);
+                DrawRectangleRec(r_chip, hov_c ? (Color){ 65, 95, 145, 255 } : (Color){ 32, 44, 68, 255 });
+                DrawRectangleLinesEx(r_chip, 1.0f, hov_c ? GOLD : SKYBLUE);
+                dibujar_texto_ajustado(chips_txt[c], r_chip, font_hud - 4, true, RAYWHITE);
+
+                if (hov_c && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                    snprintf(entrada_consola, sizeof(entrada_consola), "%s", chips_cmd[c]);
+                    cursor_consola_bytes = (int)strlen(entrada_consola);
+                    evaluar_comando_consola_latino(entrada_consola);
+                }
+            }
+
+            // Barra de inserción rápida de caracteres en español en la consola
+            float w_ac = (rect_consola.width - 42.0f) / 10.0f;
+            float y_ac = rect_consola.y + rect_consola.height - (float)(font_hud * 2) - 42.0f;
+            for (int c = 0; c < 10; c++) {
+                Rectangle r_ac = { rect_consola.x + 12.0f + (float)c * (w_ac + 2.0f), y_ac, w_ac, 24.0f };
+                bool hov_ac = CheckCollisionPointRec(pos_raton, r_ac);
+                DrawRectangleRec(r_ac, hov_ac ? (Color){ 65, 105, 160, 255 } : (Color){ 28, 38, 56, 255 });
+                DrawRectangleLinesEx(r_ac, 1.0f, hov_ac ? GOLD : SKYBLUE);
+                dibujar_texto_ajustado(acentos_es[c], r_ac, font_hud - 3, true, WHITE);
+                if (hov_ac && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                    utf8_insertar_en_cursor(entrada_consola, sizeof(entrada_consola), &cursor_consola_bytes, acentos_es[c]);
+                    reproducir_sonido_motor(SONIDO_CLIC);
+                }
+            }
+
+            int y_log = (int)(y_chip + font_hud + 16.0f);
+            int max_y_log = (int)(y_ac - 6.0f);
+            for (int l = 0; l < total_logs_consola && y_log < max_y_log; l++) {
+                Rectangle r_linea = { rect_consola.x + 16.0f, (float)y_log, rect_consola.width - 32.0f, (float)font_hud + 2.0f };
+                Color c_log = (strncmp(historial_consola[l], "latino>", 7) == 0) ? SKYBLUE :
+                              (strstr(historial_consola[l], "[Error") != NULL ? RED : GREEN);
+                dibujar_texto_ajustado(historial_consola[l], r_linea, font_hud - 3, false, c_log);
+                y_log += font_hud + 2;
+            }
+
+            Rectangle r_input_con = {
+                rect_consola.x + 12.0f,
+                rect_consola.y + rect_consola.height - (float)font_hud - 24.0f,
+                rect_consola.width - 24.0f,
+                (float)font_hud + 16.0f
+            };
+            DrawRectangleRec(r_input_con, (Color){ 22, 28, 38, 255 });
+            DrawRectangleLinesEx(r_input_con, 2.0f, GOLD);
+
+            bool blink = (((int)(GetTime() * 2.5)) % 2 == 0);
+            char con_cursor[192];
+            construir_texto_con_cursor(entrada_consola, cursor_consola_bytes, blink, con_cursor, sizeof(con_cursor));
+            dibujar_texto_ajustado(
+                TextFormat("latino> %s", con_cursor),
+                r_input_con, font_hud - 2, false, YELLOW
+            );
+        }
+
+        // --- O. NOTIFICACIÓN FLOTANTE (TOAST UX) ---
         if (tiempo_toast > 0.0f && texto_toast[0] != '\0') {
             float alpha = (tiempo_toast < 0.8f) ? (tiempo_toast / 0.8f) : 1.0f;
-            unsigned char opacidad = (unsigned char)(235.0f * alpha);
-            int ancho_t = MeasureText(texto_toast, font_hud) + 44;
-            int x_t = (area_libre_w - ancho_t) / 2;
-            if (x_t < 20) x_t = 20;
-            int y_t = alto_hud + 18;
+            unsigned char opacidad = (unsigned char)(240.0f * alpha);
+            int max_w_toast = area_libre_w - 40;
+            int ancho_t = medir_texto_ui(texto_toast, font_hud) + 40;
+            if (ancho_t > max_w_toast) ancho_t = max_w_toast;
 
-            DrawRectangle(x_t, y_t, ancho_t, font_hud + 24, (Color){ 20, 65, 95, opacidad });
-            DrawRectangleLines(x_t, y_t, ancho_t, font_hud + 24, (Color){ 100, 220, 255, opacidad });
-            DrawText(texto_toast, x_t + 22, y_t + 12, font_hud, (Color){ 255, 255, 255, opacidad });
+            int x_t = (area_libre_w - ancho_t) / 2;
+            if (x_t < 16) x_t = 16;
+            int y_t = alto_hud + 16;
+
+            Rectangle r_toast = { (float)x_t, (float)y_t, (float)ancho_t, (float)(font_hud + 22) };
+            DrawRectangleRec(r_toast, (Color){ 20, 65, 95, opacidad });
+            DrawRectangleLinesEx(r_toast, 2.0f, (Color){ 100, 220, 255, opacidad });
+            dibujar_texto_ajustado(texto_toast, r_toast, font_hud - 1, true, (Color){ 255, 255, 255, opacidad });
         }
 
-        // --- O. TOOLTIP UX ---
+        // --- P. TOOLTIP UX CON SALTO DE LÍNEA AUTOMÁTICO ---
         if (!modal_activo && tooltip_activo != NULL) {
             int f_tip = font_hud - 4;
-            if (f_tip < 15) f_tip = 15;
-            int w_tip = MeasureText(tooltip_activo, f_tip) + 28;
-            int h_tip = f_tip + 20;
+            if (f_tip < 14) f_tip = 14;
+            int w_tip = 310;
+            Rectangle area_med = { 0, 0, (float)(w_tip - 24), 200 };
+            int alto_texto_tip = procesar_texto_multilinea(tooltip_activo, area_med, f_tip, YELLOW, false);
+            int h_tip = alto_texto_tip + 18;
+
             int x_tip = (int)pos_raton.x - w_tip - 16;
             int y_tip = (int)pos_raton.y + 12;
-            if (x_tip < 10) x_tip = 10;
-            if (y_tip + h_tip > screenHeight - 10) y_tip = screenHeight - h_tip - 10;
+            if (x_tip < 12) x_tip = 12;
+            if (y_tip + h_tip > screenHeight - 12) y_tip = screenHeight - h_tip - 12;
 
-            DrawRectangle(x_tip, y_tip, w_tip, h_tip, (Color){ 10, 12, 16, 245 });
-            DrawRectangleLines(x_tip, y_tip, w_tip, h_tip, GOLD);
-            DrawText(tooltip_activo, x_tip + 14, y_tip + 10, f_tip, YELLOW);
+            DrawRectangle(x_tip, y_tip, w_tip, h_tip, (Color){ 10, 12, 18, 248 });
+            DrawRectangleLinesEx((Rectangle){ (float)x_tip, (float)y_tip, (float)w_tip, (float)h_tip }, 1.5f, GOLD);
+            Rectangle area_dib = { (float)(x_tip + 12), (float)(y_tip + 9), (float)(w_tip - 24), (float)alto_texto_tip };
+            procesar_texto_multilinea(tooltip_activo, area_dib, f_tip, YELLOW, true);
         }
 
-        // --- P. LECTURA DE CARTELES ---
-        if (obtener_casilla_mundo(jugador_x, jugador_y) == 3) {
+        // --- Q. LECTURA DE CARTELES ---
+        if (!consola_activa && obtener_casilla_mundo(jugador_x, jugador_y) == 3) {
             const char *msg = buscar_texto_cartel(jugador_x, jugador_y);
             if (msg != NULL) {
-                int alto_caja = font_hud + 28;
-                int x_cartel = mostrar_minimapa ? 230 : 26;
+                int x_cartel = mostrar_minimapa ? 214 : 24;
+                int w_cartel = area_libre_w - x_cartel - 24;
+                if (w_cartel < 240) w_cartel = 240;
+
+                Rectangle area_med = { 0, 0, (float)(w_cartel - 32), 200 };
+                int h_txt = procesar_texto_multilinea(msg, area_med, font_hud - 2, YELLOW, false);
+                int alto_caja = h_txt + 22;
                 int y_cartel = (int)rect_hotbar.y - alto_caja - 12;
-                int w_cartel = area_libre_w - x_cartel - 26;
-                DrawRectangle(x_cartel, y_cartel, w_cartel, alto_caja, (Color){ 20, 20, 20, 240 });
-                DrawRectangleLines(x_cartel, y_cartel, w_cartel, alto_caja, GOLD);
-                DrawText(msg, x_cartel + 20, y_cartel + (alto_caja - font_hud) / 2, font_hud - 2, YELLOW);
+
+                DrawRectangle(x_cartel, y_cartel, w_cartel, alto_caja, (Color){ 20, 20, 20, 242 });
+                DrawRectangleLinesEx((Rectangle){ (float)x_cartel, (float)y_cartel, (float)w_cartel, (float)alto_caja }, 2.0f, GOLD);
+
+                Rectangle area_dib = { (float)(x_cartel + 16), (float)(y_cartel + 11), (float)(w_cartel - 32), (float)h_txt };
+                procesar_texto_multilinea(msg, area_dib, font_hud - 2, YELLOW, true);
             }
         }
 
-        // --- Q. VENTANA MODAL EMERGENTE (CONTROLADA DESDE LATINO) ---
+        // --- R. VENTANA MODAL EMERGENTE ---
         if (modal_activo) {
-            DrawRectangle(0, 0, screenWidth, screenHeight, (Color){ 0, 0, 0, 175 });
-            int w_mod = (int)(760.0f * escala_ui);
-            if (w_mod > screenWidth - 60) w_mod = screenWidth - 60;
-            int h_mod = (int)(260.0f * escala_ui);
+            DrawRectangle(0, 0, screenWidth, screenHeight, (Color){ 0, 0, 0, 185 });
+            int w_mod = (int)(680.0f * escala_ui);
+            if (w_mod > screenWidth - 80) w_mod = screenWidth - 80;
+
+            Rectangle area_med = { 0, 0, (float)(w_mod - 56), 400 };
+            int alto_cuerpo = procesar_texto_multilinea(modal_mensaje, area_med, font_hud - 1, tema.texto_normal, false);
+            int h_mod = font_hud + 48 + alto_cuerpo + 84;
+
             int x_mod = (screenWidth - w_mod) / 2;
             int y_mod = (screenHeight - h_mod) / 2;
 
             DrawRectangle(x_mod, y_mod, w_mod, h_mod, tema.fondo_panel);
             DrawRectangleLinesEx((Rectangle){ (float)x_mod, (float)y_mod, (float)w_mod, (float)h_mod }, 3.0f, GOLD);
 
-            DrawText(modal_titulo, x_mod + 28, y_mod + 24, font_hud + 2, tema.texto_titulo);
-            DrawLine(x_mod + 24, y_mod + font_hud + 36, x_mod + w_mod - 24, y_mod + font_hud + 36, tema.borde_panel);
-            DrawText(modal_mensaje, x_mod + 28, y_mod + font_hud + 58, font_hud - 2, tema.texto_normal);
+            Rectangle r_tit_mod = { (float)(x_mod + 24), (float)(y_mod + 16), (float)(w_mod - 48), (float)(font_hud + 10) };
+            dibujar_texto_ajustado(modal_titulo, r_tit_mod, font_hud + 2, false, tema.texto_titulo);
+            DrawLine(x_mod + 24, y_mod + font_hud + 34, x_mod + w_mod - 24, y_mod + font_hud + 34, tema.borde_panel);
+
+            Rectangle area_cuerpo = { (float)(x_mod + 28), (float)(y_mod + font_hud + 48), (float)(w_mod - 56), (float)alto_cuerpo };
+            procesar_texto_multilinea(modal_mensaje, area_cuerpo, font_hud - 1, tema.texto_normal, true);
 
             Rectangle btn_cerrar = {
                 (float)(x_mod + w_mod / 2 - 140),
-                (float)(y_mod + h_mod - 64),
+                (float)(y_mod + h_mod - 62),
                 280.0f,
-                46.0f
+                44.0f
             };
             DrawRectangleRec(btn_cerrar, (Color){ 45, 135, 85, 255 });
             DrawRectangleLinesEx(btn_cerrar, 2.0f, WHITE);
-            DrawText("Aceptar [Clic / Enter]", (int)btn_cerrar.x + 24, (int)btn_cerrar.y + 12, font_hud - 2, WHITE);
+            dibujar_texto_ajustado("Aceptar [Clic / Enter]", btn_cerrar, font_hud - 2, true, WHITE);
         }
 
         EndDrawing();
     }
 
+    if (fuente_ttf_cargada) {
+        UnloadFont(fuente_ui);
+    }
+    cerrar_audio_procedural();
     CloseWindow();
     return 0;
 }
