@@ -3,3 +3,14 @@ mundo.dat
 mundo_chunks.dat
 mundo_chunks.dat
 mundo_chunks_v08.dat
+
+# Directorios de compilacion de LatinoUI
+/build/
+/build-debug/
+/build-release/
+
+# Ejecutable de pruebas manuales
+/tests/test_ui_layout
+
+# Respaldos locales de codigo fuente
+*.antes_filas

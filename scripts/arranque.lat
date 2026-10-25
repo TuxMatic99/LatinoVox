@@ -161,10 +161,15 @@ si (modo == 0)
     motor.ui_interruptor(302, "Marcha Continua 1-Toque", 1)
 
     motor.ui_etiqueta("-- Temas Visuales (Frontend) --")
-    motor.ui_boton(50, "Tema Oscuro (Studio)",    45,  55,  75)
-    motor.ui_boton(51, "Tema Claro (Papel)",     150, 160, 175)
-    motor.ui_boton(52, "Tema Esmeralda (Retro)",  25, 115,  85)
-    motor.ui_boton(60, "Guía de Combate y Gólems", 175, 115, 30)
+
+    // LatinoUI Layout experimental: dos botones comparten una fila.
+    // Cada uno conserva su evento (50 y 51).
+    motor.ui_iniciar_fila(8)
+    motor.ui_boton(50, "Tema Oscuro", 45, 55, 75)
+    motor.ui_boton(51, "Tema Claro", 150, 160, 175)
+    motor.ui_fin_contenedor()
+
+    motor.ui_boton(52, "Tema Esmeralda (Retro)", 25, 115, 85)
 
     // Posicionar en el centro del nuevo universo gigante (512, 512) y crear 3 Gólems iniciales
     motor.colocar_jugador(512, 512)
