@@ -22,7 +22,7 @@
 #define MAX_NODOS 32
 #define MAX_MSG_LEN 192
 #define MAX_CARTELES 64
-#define MAX_WIDGETS_UI 64
+#define MAX_WIDGETS_UI 128  // arranque.lat registra actualmente 72 widgets
 #define MAX_PESTANAS_UI 6
 #define MAX_LUCES_VISIBLES 128
 #define MAX_LOGS_CONSOLA 10
@@ -135,6 +135,7 @@ typedef struct {
     int valor;
     // Rectángulo final compartido por dibujo e interacción.
     Rectangle rect_calculado;
+    int fila_id; // 0 = columna tradicional
 } WidgetUI;
 
 typedef struct {
@@ -182,6 +183,9 @@ static int pestana_en_construccion = 0;
 
 static WidgetUI widgets_ui[MAX_WIDGETS_UI];
 static int total_widgets_ui = 0;
+static int fila_ui_actual = 0;
+static int siguiente_fila_ui = 0;
+static float separacion_fila_ui[MAX_WIDGETS_UI + 1];
 static char titulo_ui[48] = "LatinoUI Studio";
 static bool mostrar_panel_ui = true;
 static int ultimo_evento_id = 0;
@@ -1232,6 +1236,7 @@ static void motor_ui_resumen_inv(lat_mv *mv)
         w->activo = true;
         w->tipo = WIDGET_INVENTARIO;
         w->pestana = pestana_en_construccion;
+        w->fila_id = 0; // solo los botones participan en filas por ahora
         w->id = -2;
     }
 }
@@ -1261,7 +1266,33 @@ static void motor_ui_pestana(lat_mv *mv)
             total_pestanas_ui = id + 1;
         }
         pestana_en_construccion = id;
+        fila_ui_actual = 0;
     }
+}
+
+// Primera API declarativa: una sola fila abierta a la vez.
+// Solo deben agruparse botones en esta versión experimental.
+static void motor_ui_iniciar_fila(lat_mv *mv)
+{
+    lat_objeto *o = latC_desapilar(mv);
+    double espacio = latC_checar_numerico(mv, o);
+    if (fila_ui_actual != 0 || siguiente_fila_ui >= MAX_WIDGETS_UI ||
+        !isfinite(espacio) || espacio < 0.0 || espacio > 100.0) {
+        fprintf(stderr, "LatinoUI: fila invalida o anidada (espaciado 0..100)\n");
+        return;
+    }
+    fila_ui_actual = ++siguiente_fila_ui;
+    separacion_fila_ui[fila_ui_actual] = (float)espacio;
+}
+
+static void motor_ui_fin_contenedor(lat_mv *mv)
+{
+    (void)mv;
+    if (fila_ui_actual == 0) {
+        fprintf(stderr, "LatinoUI: fin_contenedor sin fila abierta\n");
+        return;
+    }
+    fila_ui_actual = 0;
 }
 
 static void motor_ui_etiqueta(lat_mv *mv)
@@ -1274,6 +1305,7 @@ static void motor_ui_etiqueta(lat_mv *mv)
         w->activo = true;
         w->tipo = WIDGET_ETIQUETA;
         w->pestana = pestana_en_construccion;
+        w->fila_id = 0; // solo los botones participan en filas por ahora
         w->id = -1;
         snprintf(w->etiqueta, sizeof(w->etiqueta), "%s", texto);
     }
@@ -1299,6 +1331,7 @@ static void motor_ui_boton(lat_mv *mv)
         w->activo = true;
         w->tipo = WIDGET_BOTON;
         w->pestana = pestana_en_construccion;
+        w->fila_id = fila_ui_actual;
         w->id = id;
         snprintf(w->etiqueta, sizeof(w->etiqueta), "%s", texto);
         w->color = (Color){ (unsigned char)r, (unsigned char)g, (unsigned char)b, 255 };
@@ -1321,6 +1354,7 @@ static void motor_ui_caja_texto(lat_mv *mv)
         w->activo = true;
         w->tipo = WIDGET_CAJA_TEXTO;
         w->pestana = pestana_en_construccion;
+        w->fila_id = 0; // solo los botones participan en filas por ahora
         w->id = id;
         snprintf(w->etiqueta, sizeof(w->etiqueta), "%s", etiqueta);
         snprintf(w->texto, sizeof(w->texto), "%s", inicial);
@@ -1347,6 +1381,7 @@ static void motor_ui_deslizador(lat_mv *mv)
         w->activo = true;
         w->tipo = WIDGET_DESLIZADOR;
         w->pestana = pestana_en_construccion;
+        w->fila_id = 0; // solo los botones participan en filas por ahora
         w->id = id;
         snprintf(w->etiqueta, sizeof(w->etiqueta), "%s", etiqueta);
         w->min_val = min_v;
@@ -1371,6 +1406,7 @@ static void motor_ui_interruptor(lat_mv *mv)
         w->activo = true;
         w->tipo = WIDGET_INTERRUPTOR;
         w->pestana = pestana_en_construccion;
+        w->fila_id = 0; // solo los botones participan en filas por ahora
         w->id = id;
         snprintf(w->etiqueta, sizeof(w->etiqueta), "%s", etiqueta);
         w->valor = (estado != 0) ? 1 : 0;
@@ -1395,6 +1431,7 @@ static void motor_ui_progreso(lat_mv *mv)
         w->activo = true;
         w->tipo = WIDGET_PROGRESO;
         w->pestana = pestana_en_construccion;
+        w->fila_id = 0; // solo los botones participan en filas por ahora
         w->id = id;
         snprintf(w->etiqueta, sizeof(w->etiqueta), "%s", etiqueta);
         w->min_val = 0;
@@ -1692,6 +1729,8 @@ static const lat_CReg libmotor[] = {
     {"ui_pestana",         motor_ui_pestana,         2},
     {"ui_etiqueta",        motor_ui_etiqueta,        1},
     {"ui_boton",           motor_ui_boton,           5},
+    {"ui_iniciar_fila",    motor_ui_iniciar_fila,    1},
+    {"ui_fin_contenedor",  motor_ui_fin_contenedor,  0},
     {"ui_caja_texto",      motor_ui_caja_texto,      3},
     {"ui_deslizador",      motor_ui_deslizador,      5},
     {"ui_interruptor",     motor_ui_interruptor,     3},
@@ -2103,6 +2142,9 @@ static void inicializar_mundo_con_latino(bool conservar_estado)
     memset(widgets_ui, 0, sizeof(widgets_ui));
     memset(pestanas_ui, 0, sizeof(pestanas_ui));
     total_widgets_ui = 0;
+    fila_ui_actual = 0;
+    siguiente_fila_ui = 0;
+    memset(separacion_fila_ui, 0, sizeof(separacion_fila_ui));
     total_pestanas_ui = 0;
     pestana_en_construccion = 0;
     total_chunks_generados = 0;
@@ -2120,6 +2162,9 @@ static void inicializar_mundo_con_latino(bool conservar_estado)
     }
 
     ejecutar_script_latino(0, 0, 0);
+    if (total_widgets_ui >= MAX_WIDGETS_UI) {
+        fprintf(stderr, "LatinoUI: limite de %d widgets alcanzado; revise los controles\n", MAX_WIDGETS_UI);
+    }
 
     if (conservar_estado) {
         jugador_x = prev_x;
@@ -2376,115 +2421,96 @@ static Color aplicar_iluminacion_casilla(Color base, float oscuridad, float luz_
  * Las coordenadas resultantes son coordenadas de pantalla.
  */
 static void actualizar_geometria_widgets(
-    Rectangle panel,
-    Rectangle area_scroll,
-    int font_w
+    Rectangle panel, Rectangle area_scroll, int font_w
 ) {
     UIElemento elementos[MAX_WIDGETS_UI];
     UIRect rectangulos[MAX_WIDGETS_UI];
     int indices[MAX_WIDGETS_UI];
-
-    size_t cantidad = 0;
+    int longitudes[MAX_WIDGETS_UI];
+    size_t grupos = 0;
     float altura_total = 0.0f;
+    const float separacion_vertical = 10.0f;
 
-    // 1. Medir los widgets visibles en la pestaña activa.
-    for (int i = 0; i < total_widgets_ui; i++) {
+    for (int i = 0; i < total_widgets_ui;) {
         WidgetUI *w = &widgets_ui[i];
+        if (!w->activo || w->pestana != pestana_actual) { i++; continue; }
 
-        if (!w->activo || w->pestana != pestana_actual) {
+        int largo = 1;
+        int fila = w->fila_id;
+        if (fila > 0) {
+            while (i + largo < total_widgets_ui &&
+                   widgets_ui[i + largo].activo &&
+                   widgets_ui[i + largo].pestana == pestana_actual &&
+                   widgets_ui[i + largo].fila_id == fila) largo++;
+        }
+        float alto_grupo = 0.0f;
+        for (int j = 0; j < largo; j++) {
+            WidgetUI *h = &widgets_ui[i + j];
+            bool foco = h->tipo == WIDGET_CAJA_TEXTO && id_caja_activa == h->id;
+            float alto = (float)(font_w + 22);
+            if (h->tipo == WIDGET_ETIQUETA) alto = (float)(font_w + 10);
+            if (h->tipo == WIDGET_CAJA_TEXTO) alto = (float)(font_w * 2 + 26 + (foco ? 30 : 0));
+            if (h->tipo == WIDGET_DESLIZADOR) alto = (float)(font_w * 2 + 24);
+            if (h->tipo == WIDGET_PROGRESO) alto = (float)(font_w * 2 + 22);
+            if (h->tipo == WIDGET_INVENTARIO) alto = (float)((font_w + 16) * 3 + 12);
+            if (alto > alto_grupo) alto_grupo = alto;
+        }
+        indices[grupos] = i;
+        longitudes[grupos] = largo;
+        elementos[grupos] = (UIElemento){alto_grupo, 0.0f};
+        altura_total += alto_grupo;
+        grupos++;
+        i += largo;
+    }
+    if (grupos == 0) { scroll_panel_y = 0.0f; return; }
+    altura_total += (float)(grupos - 1) * separacion_vertical;
+    float visible = area_scroll.height - 16.0f;
+    if (visible < 0) visible = 0;
+    float minimo_scroll = visible - altura_total;
+    if (minimo_scroll > 0) minimo_scroll = 0;
+    if (scroll_panel_y < minimo_scroll) scroll_panel_y = minimo_scroll;
+    if (scroll_panel_y > 0) scroll_panel_y = 0;
+
+    UIRect contenedor = {panel.x + 14.0f,
+                        area_scroll.y + scroll_panel_y + 8.0f,
+                        fmaxf(0.0f, panel.width - 28.0f), altura_total};
+    UIResultado estado = ui_distribuir(contenedor, UI_COLUMNA,
+                         separacion_vertical, 0, elementos, grupos, rectangulos);
+    if (estado != UI_LAYOUT_OK) {
+        for (int i = 0; i < total_widgets_ui; ++i)
+            widgets_ui[i].rect_calculado = (Rectangle){0};
+        return;
+    }
+
+    for (size_t g = 0; g < grupos; ++g) {
+        int inicio = indices[g];
+        int largo = longitudes[g];
+        UIRect r = rectangulos[g];
+        if (largo == 1) {
+            widgets_ui[inicio].rect_calculado =
+                (Rectangle){r.x, r.y, r.ancho, r.alto};
             continue;
         }
-
-        bool foco = (
-            w->tipo == WIDGET_CAJA_TEXTO &&
-            id_caja_activa == w->id
-        );
-
-        int alto = font_w + 22;
-
-        if (w->tipo == WIDGET_ETIQUETA)
-            alto = font_w + 10;
-
-        if (w->tipo == WIDGET_CAJA_TEXTO)
-            alto = font_w * 2 + 26 + (foco ? 30 : 0);
-
-        if (w->tipo == WIDGET_DESLIZADOR)
-            alto = font_w * 2 + 24;
-
-        if (w->tipo == WIDGET_PROGRESO)
-            alto = font_w * 2 + 22;
-
-        if (w->tipo == WIDGET_INVENTARIO)
-            alto = (font_w + 16) * 3 + 12;
-
-        indices[cantidad] = i;
-        elementos[cantidad] = (UIElemento){
-            .base = (float)alto,
-            .crecimiento = 0.0f
-        };
-
-        altura_total += (float)alto;
-        cantidad++;
-    }
-
-    if (cantidad == 0) {
-        scroll_panel_y = 0.0f;
-        return;
-    }
-
-    // 2. Añadir las separaciones entre widgets.
-    const float separacion = 10.0f;
-
-    altura_total += (float)(cantidad - 1) * separacion;
-
-    // Mantener el desplazamiento dentro del contenido real.
-    float altura_visible = area_scroll.height - 16.0f;
-    if (altura_visible < 0.0f) altura_visible = 0.0f;
-    float scroll_min = altura_visible - altura_total;
-    if (scroll_min > 0.0f) scroll_min = 0.0f;
-    if (scroll_panel_y < scroll_min) scroll_panel_y = scroll_min;
-    if (scroll_panel_y > 0.0f) scroll_panel_y = 0.0f;
-
-    // 3. Usar la altura completa del contenido,
-    // no únicamente la altura visible del panel.
-    UIRect contenedor = {
-        .x = panel.x + 14.0f,
-        .y = area_scroll.y + scroll_panel_y + 8.0f,
-        .ancho = panel.width - 28.0f,
-        .alto = altura_total
-    };
-
-    if (contenedor.ancho < 0.0f)
-        contenedor.ancho = 0.0f;
-
-    // 4. Delegar la distribución a LatinoUI Layout.
-    UIResultado resultado = ui_distribuir(
-        contenedor,
-        UI_COLUMNA,
-        separacion,
-        0.0f,
-        elementos,
-        cantidad,
-        rectangulos
-    );
-
-    if (resultado != UI_LAYOUT_OK) {
-        // No utilizar coordenadas antiguas si falla el cálculo.
-        for (size_t n = 0; n < cantidad; n++) {
-            widgets_ui[indices[n]].rect_calculado =
-                (Rectangle){0};
+        UIElemento hijos[MAX_WIDGETS_UI];
+        UIRect salida[MAX_WIDGETS_UI];
+        int fila = widgets_ui[inicio].fila_id;
+        float espacio = separacion_fila_ui[fila];
+        float espacio_util = r.ancho - (float)(largo - 1) * espacio;
+        // Reducir el tamaño base si la ventana no admite 80 px por botón.
+        // Si no existe espacio positivo, el layout devuelve error y no
+        // presentamos rectángulos con dimensiones negativas.
+        float base_boton = fminf(80.0f, espacio_util / (float)largo);
+        for (int j = 0; j < largo; j++)
+            hijos[j] = (UIElemento){fmaxf(0.0f, base_boton), 1.0f};
+        estado = ui_distribuir(r, UI_FILA, espacio, 0, hijos,
+                               (size_t)largo, salida);
+        for (int j = 0; j < largo; j++) {
+            widgets_ui[inicio + j].rect_calculado =
+                estado == UI_LAYOUT_OK
+                ? (Rectangle){salida[j].x, salida[j].y,
+                              salida[j].ancho, salida[j].alto}
+                : (Rectangle){0};
         }
-        return;
-    }
-
-    // 5. Almacenar las posiciones definitivas.
-    for (size_t n = 0; n < cantidad; n++) {
-        widgets_ui[indices[n]].rect_calculado = (Rectangle){
-            rectangulos[n].x,
-            rectangulos[n].y,
-            rectangulos[n].ancho,
-            rectangulos[n].alto
-        };
     }
 }
 
@@ -2861,6 +2887,7 @@ int main(void)
 
                 bool tiene_foco_caja = (w->tipo == WIDGET_CAJA_TEXTO && id_caja_activa == w->id);
                 Rectangle rect_item = w->rect_calculado;
+                if (rect_item.width <= 0.0f || rect_item.height <= 0.0f) continue;
 
                 bool visible = (rect_item.y + rect_item.height >= area_scroll_ui.y) &&
                                (rect_item.y <= area_scroll_ui.y + area_scroll_ui.height);
@@ -3415,6 +3442,7 @@ int main(void)
                 if (!w->activo || w->pestana != pestana_actual) continue;
                 bool tiene_foco_caja = (w->tipo == WIDGET_CAJA_TEXTO && id_caja_activa == w->id);
                 Rectangle rect_item = w->rect_calculado;
+                if (rect_item.width <= 0.0f || rect_item.height <= 0.0f) continue;
 
                 bool visible = (rect_item.y + rect_item.height >= area_scroll_ui.y) &&
                                (rect_item.y <= area_scroll_ui.y + area_scroll_ui.height);
