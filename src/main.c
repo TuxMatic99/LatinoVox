@@ -184,8 +184,6 @@ static int pestana_en_construccion = 0;
 
 static WidgetUI widgets_ui[MAX_WIDGETS_UI];
 static int total_widgets_ui = 0;
-static int fila_ui_actual = 0;
-static int siguiente_fila_ui = 0;
 static float separacion_fila_ui[MAX_WIDGETS_UI + 1];
 static UIContContexto contenedores_ui;
 static UIContElemento miembros_contenedor_ui[MAX_WIDGETS_UI];
@@ -1273,7 +1271,6 @@ static void motor_ui_pestana(lat_mv *mv)
             fprintf(stderr, "LatinoUI: cerrando fila pendiente al cambiar de pestana\n");
             (void)ui_cont_fin(&contenedores_ui);
         }
-        fila_ui_actual = 0;
     }
 }
 
@@ -1288,9 +1285,6 @@ static void motor_ui_iniciar_fila(lat_mv *mv)
         fprintf(stderr, "LatinoUI: no se pudo iniciar fila (codigo %d)\n", (int)resultado);
         return;
     }
-    fila_ui_actual = (int)contenedores_ui.grupo_actual;
-    siguiente_fila_ui = (int)contenedores_ui.siguiente_grupo;
-    separacion_fila_ui[fila_ui_actual] = contenedores_ui.espaciados[fila_ui_actual];
 }
 
 static void motor_ui_fin_contenedor(lat_mv *mv)
@@ -1301,7 +1295,6 @@ static void motor_ui_fin_contenedor(lat_mv *mv)
         fprintf(stderr, "LatinoUI: cierre de fila invalido (codigo %d)\n", (int)resultado);
         return;
     }
-    fila_ui_actual = 0;
 }
 
 static void motor_ui_etiqueta(lat_mv *mv)
@@ -2158,8 +2151,6 @@ static void inicializar_mundo_con_latino(bool conservar_estado)
     memset(widgets_ui, 0, sizeof(widgets_ui));
     memset(pestanas_ui, 0, sizeof(pestanas_ui));
     total_widgets_ui = 0;
-    fila_ui_actual = 0;
-    siguiente_fila_ui = 0;
     memset(separacion_fila_ui, 0, sizeof(separacion_fila_ui));
     UIContResultado inicializado = ui_cont_inicializar(
         &contenedores_ui, miembros_contenedor_ui, MAX_WIDGETS_UI,
@@ -2517,7 +2508,21 @@ static void actualizar_geometria_widgets(
         UIElemento hijos[MAX_WIDGETS_UI];
         UIRect salida[MAX_WIDGETS_UI];
         int fila = widgets_ui[inicio].fila_id;
-        float espacio = separacion_fila_ui[fila];
+        float espacio = 0.0f;
+
+        UIContResultado consulta = ui_cont_obtener_espaciado(
+            &contenedores_ui,
+            (size_t)fila,
+            &espacio
+        );
+
+        if (consulta != UI_CONT_OK) {
+            for (int j = 0; j < largo; j++) {
+                widgets_ui[inicio + j].rect_calculado =
+                    (Rectangle){0};
+            }
+            continue;
+        }
         float espacio_util = r.ancho - (float)(largo - 1) * espacio;
         // Reducir el tamaño base si la ventana no admite 80 px por botón.
         // Si no existe espacio positivo, el layout devuelve error y no
