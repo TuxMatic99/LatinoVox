@@ -5,6 +5,7 @@
 #include <locale.h>
 #include "raylib.h"
 #include "ui_layout.h"
+#include "ui_contenedores.h"
 
 // Cabeceras de Latino-Core
 #include "latino.h"
@@ -186,6 +187,8 @@ static int total_widgets_ui = 0;
 static int fila_ui_actual = 0;
 static int siguiente_fila_ui = 0;
 static float separacion_fila_ui[MAX_WIDGETS_UI + 1];
+static UIContContexto contenedores_ui;
+static UIContElemento miembros_contenedor_ui[MAX_WIDGETS_UI];
 static char titulo_ui[48] = "LatinoUI Studio";
 static bool mostrar_panel_ui = true;
 static int ultimo_evento_id = 0;
@@ -1266,6 +1269,10 @@ static void motor_ui_pestana(lat_mv *mv)
             total_pestanas_ui = id + 1;
         }
         pestana_en_construccion = id;
+        if (contenedores_ui.grupo_actual != 0) {
+            fprintf(stderr, "LatinoUI: cerrando fila pendiente al cambiar de pestana\n");
+            (void)ui_cont_fin(&contenedores_ui);
+        }
         fila_ui_actual = 0;
     }
 }
@@ -1276,20 +1283,22 @@ static void motor_ui_iniciar_fila(lat_mv *mv)
 {
     lat_objeto *o = latC_desapilar(mv);
     double espacio = latC_checar_numerico(mv, o);
-    if (fila_ui_actual != 0 || siguiente_fila_ui >= MAX_WIDGETS_UI ||
-        !isfinite(espacio) || espacio < 0.0 || espacio > 100.0) {
-        fprintf(stderr, "LatinoUI: fila invalida o anidada (espaciado 0..100)\n");
+    UIContResultado resultado = ui_cont_iniciar_fila(&contenedores_ui, (float)espacio);
+    if (resultado != UI_CONT_OK) {
+        fprintf(stderr, "LatinoUI: no se pudo iniciar fila (codigo %d)\n", (int)resultado);
         return;
     }
-    fila_ui_actual = ++siguiente_fila_ui;
-    separacion_fila_ui[fila_ui_actual] = (float)espacio;
+    fila_ui_actual = (int)contenedores_ui.grupo_actual;
+    siguiente_fila_ui = (int)contenedores_ui.siguiente_grupo;
+    separacion_fila_ui[fila_ui_actual] = contenedores_ui.espaciados[fila_ui_actual];
 }
 
 static void motor_ui_fin_contenedor(lat_mv *mv)
 {
     (void)mv;
-    if (fila_ui_actual == 0) {
-        fprintf(stderr, "LatinoUI: fin_contenedor sin fila abierta\n");
+    UIContResultado resultado = ui_cont_fin(&contenedores_ui);
+    if (resultado != UI_CONT_OK) {
+        fprintf(stderr, "LatinoUI: cierre de fila invalido (codigo %d)\n", (int)resultado);
         return;
     }
     fila_ui_actual = 0;
@@ -1331,7 +1340,14 @@ static void motor_ui_boton(lat_mv *mv)
         w->activo = true;
         w->tipo = WIDGET_BOTON;
         w->pestana = pestana_en_construccion;
-        w->fila_id = fila_ui_actual;
+        UIContResultado registro = ui_cont_agregar(&contenedores_ui, id);
+        if (registro != UI_CONT_OK) {
+            fprintf(stderr, "LatinoUI: error al registrar boton %d (codigo %d)\n", id, (int)registro);
+            total_widgets_ui--;
+            memset(w, 0, sizeof(*w));
+            return;
+        }
+        w->fila_id = (int)ui_cont_grupo_de(&contenedores_ui, contenedores_ui.cantidad - 1);
         w->id = id;
         snprintf(w->etiqueta, sizeof(w->etiqueta), "%s", texto);
         w->color = (Color){ (unsigned char)r, (unsigned char)g, (unsigned char)b, 255 };
@@ -2145,6 +2161,13 @@ static void inicializar_mundo_con_latino(bool conservar_estado)
     fila_ui_actual = 0;
     siguiente_fila_ui = 0;
     memset(separacion_fila_ui, 0, sizeof(separacion_fila_ui));
+    UIContResultado inicializado = ui_cont_inicializar(
+        &contenedores_ui, miembros_contenedor_ui, MAX_WIDGETS_UI,
+        separacion_fila_ui);
+    if (inicializado != UI_CONT_OK) {
+        fprintf(stderr, "LatinoUI: no se pudo inicializar contenedores\n");
+        return;
+    }
     total_pestanas_ui = 0;
     pestana_en_construccion = 0;
     total_chunks_generados = 0;

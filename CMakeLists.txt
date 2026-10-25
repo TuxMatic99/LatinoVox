@@ -125,3 +125,32 @@ target_link_libraries(demo_ui_layout
         raylib
         m
 )
+
+# Biblioteca independiente de contenedores
+add_library(latino_ui_contenedores STATIC
+    src/ui/ui_contenedores.c
+)
+
+target_include_directories(latino_ui_contenedores
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+if(BUILD_TESTING)
+    add_executable(test_ui_contenedores
+        tests/test_ui_contenedores.c
+    )
+
+    target_link_libraries(test_ui_contenedores
+        PRIVATE
+            latino_ui_contenedores
+            m
+    )
+
+    add_test(
+        NAME latino_ui_contenedores_basico
+        COMMAND test_ui_contenedores
+    )
+endif()
+# Agrupación de widgets administrada por el módulo independiente.
+target_link_libraries(motor PRIVATE latino_ui_contenedores)
