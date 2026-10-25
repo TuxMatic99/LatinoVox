@@ -51,3 +51,23 @@ size_t ui_cont_grupo_de(const UIContContexto *ctx, size_t indice)
     if (!ctx || !ctx->elementos || indice >= ctx->cantidad) return 0;
     return ctx->elementos[indice].id_grupo;
 }
+
+UIContResultado ui_cont_obtener_espaciado(
+    const UIContContexto *ctx,
+    size_t id_grupo,
+    float *espacio
+)
+{
+    if (ctx == NULL ||
+        ctx->espaciados == NULL ||
+        espacio == NULL ||
+        id_grupo == 0 ||
+        id_grupo > ctx->siguiente_grupo ||
+        id_grupo > ctx->capacidad) {
+        return UI_CONT_ARGUMENTO_INVALIDO;
+    }
+
+    *espacio = ctx->espaciados[id_grupo];
+
+    return UI_CONT_OK;
+}

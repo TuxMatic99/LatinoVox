@@ -34,4 +34,9 @@ UIContResultado ui_cont_iniciar_fila(UIContContexto *ctx, float espacio);
 UIContResultado ui_cont_agregar(UIContContexto *ctx, int id_widget);
 UIContResultado ui_cont_fin(UIContContexto *ctx);
 size_t ui_cont_grupo_de(const UIContContexto *ctx, size_t indice);
+UIContResultado ui_cont_obtener_espaciado(
+    const UIContContexto *ctx,
+    size_t id_grupo,
+    float *espacio
+);
 #endif

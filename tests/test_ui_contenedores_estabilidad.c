@@ -100,8 +100,26 @@ static void probar_argumentos(void)
               "Entradas invalidas no modifican los grupos");
 }
 
+
+
+static int fallos_adicionales = 0;
+
+static void comprobar(int condicion, const char *descripcion)
+{
+    if (condicion) {
+        printf("[OK] %s\n", descripcion);
+    } else {
+        fprintf(stderr, "[ERROR] %s\n", descripcion);
+        fallos_adicionales++;
+    }
+}
+
+
 int main(void)
 {
+
+
+
     probar_ciclo_de_vida();
     probar_capacidad();
     probar_argumentos();
@@ -110,5 +128,44 @@ int main(void)
         return 1;
     }
     puts("OK: estabilidad del modulo de contenedores");
-    return 0;
+
+{
+    UIContContexto contexto = {0};
+    UIContElemento elementos[4] = {0};
+    float espaciados[5] = {0};
+    float espacio = -1.0f;
+
+    comprobar(
+        ui_cont_inicializar(
+            &contexto, elementos, 4, espaciados
+        ) == UI_CONT_OK,
+        "Inicializar contexto para consulta"
+    );
+
+    comprobar(
+        ui_cont_iniciar_fila(&contexto, 12.0f)
+            == UI_CONT_OK,
+        "Abrir fila con separacion de 12"
+    );
+
+    comprobar(
+        ui_cont_obtener_espaciado(
+            &contexto, 1, &espacio
+        ) == UI_CONT_OK &&
+        espacio == 12.0f,
+        "Consultar separacion de la fila"
+    );
+
+    comprobar(
+        ui_cont_obtener_espaciado(
+            &contexto, 99, &espacio
+        ) == UI_CONT_ARGUMENTO_INVALIDO,
+        "Rechazar identificador inexistente"
+    );
+}
+
+
+    return fallos_adicionales == 0 ? 0 : 1;
+
+
 }
