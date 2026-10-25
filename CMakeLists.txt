@@ -75,3 +75,15 @@ if(BUILD_TESTING)
         COMMAND test_ui_layout
     )
 endif()
+
+# Demostración gráfica del motor de maquetación
+add_executable(demo_ui_layout
+    tests/demo_ui_layout.c
+)
+
+target_link_libraries(demo_ui_layout
+    PRIVATE
+        latino_ui_layout
+        raylib
+        m
+)
