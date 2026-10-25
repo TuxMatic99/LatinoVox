@@ -1,8 +1,22 @@
 
 #include "ui_layout.h"
-#include <assert.h>
+
 #include <math.h>
 #include <stdio.h>
+
+static int fallos = 0;
+
+static void comprobar(
+    int condicion,
+    const char *descripcion
+) {
+    if (condicion) {
+        printf("[OK] %s\n", descripcion);
+    } else {
+        fprintf(stderr, "[ERROR] %s\n", descripcion);
+        fallos++;
+    }
+}
 
 static int aproximadamente(float a, float b)
 {
@@ -16,57 +30,134 @@ int main(void)
         {100.0f, 1.0f}
     };
 
-    UIRect resultado[2] = {0};
-
-    // Fila: 600 px, relleno 10 por lado y
-    // separación de 20 px. Cada hijo obtiene 280 px.
-    UIRect ventana = {0, 0, 600, 200};
+    UIRect salida[2] = {0};
+    UIRect contenedor = {0, 0, 600, 200};
 
     UIResultado estado = ui_distribuir(
-        ventana, UI_FILA, 20, 10,
-        elementos, 2, resultado
+        contenedor,
+        UI_FILA,
+        20.0f,
+        10.0f,
+        elementos,
+        2,
+        salida
     );
 
-    assert(estado == UI_LAYOUT_OK);
-    assert(aproximadamente(resultado[0].x, 10));
-    assert(aproximadamente(resultado[0].ancho, 280));
-    assert(aproximadamente(resultado[1].x, 310));
-    assert(aproximadamente(resultado[1].ancho, 280));
+    comprobar(
+        estado == UI_LAYOUT_OK,
+        "Fila calculada correctamente"
+    );
 
-    // Columna: los mismos elementos distribuidos
-    // verticalmente.
-    ventana = (UIRect){0, 0, 300, 600};
+    comprobar(
+        aproximadamente(salida[0].x, 10.0f) &&
+        aproximadamente(salida[0].ancho, 280.0f) &&
+        aproximadamente(salida[1].x, 310.0f) &&
+        aproximadamente(salida[1].ancho, 280.0f),
+        "Distribucion horizontal proporcional"
+    );
+
+    contenedor = (UIRect){0, 0, 300, 600};
 
     estado = ui_distribuir(
-        ventana, UI_COLUMNA, 20, 10,
-        elementos, 2, resultado
+        contenedor,
+        UI_COLUMNA,
+        20.0f,
+        10.0f,
+        elementos,
+        2,
+        salida
     );
 
-    assert(estado == UI_LAYOUT_OK);
-    assert(aproximadamente(resultado[0].y, 10));
-    assert(aproximadamente(resultado[0].alto, 280));
-    assert(aproximadamente(resultado[1].y, 310));
+    comprobar(
+        estado == UI_LAYOUT_OK &&
+        aproximadamente(salida[0].y, 10.0f) &&
+        aproximadamente(salida[0].alto, 280.0f) &&
+        aproximadamente(salida[1].y, 310.0f) &&
+        aproximadamente(salida[1].alto, 280.0f),
+        "Distribucion vertical proporcional"
+    );
 
-    // Espacio insuficiente.
-    ventana = (UIRect){0, 0, 150, 100};
+    contenedor = (UIRect){0, 0, 150, 100};
+
+    UIRect antes[2] = {salida[0], salida[1]};
 
     estado = ui_distribuir(
-        ventana, UI_FILA, 20, 10,
-        elementos, 2, resultado
+        contenedor,
+        UI_FILA,
+        20.0f,
+        10.0f,
+        elementos,
+        2,
+        salida
     );
 
-    assert(estado == UI_LAYOUT_SIN_ESPACIO);
+    comprobar(
+        estado == UI_LAYOUT_SIN_ESPACIO,
+        "Deteccion de espacio insuficiente"
+    );
 
-    // Entrada inválida.
-    elementos[0].crecimiento = -1;
+    comprobar(
+        aproximadamente(salida[0].x, antes[0].x) &&
+        aproximadamente(salida[1].y, antes[1].y),
+        "No modifica resultados al faltar espacio"
+    );
+
+    elementos[0].crecimiento = -1.0f;
 
     estado = ui_distribuir(
-        ventana, UI_FILA, 20, 10,
-        elementos, 2, resultado
+        contenedor,
+        UI_FILA,
+        20.0f,
+        10.0f,
+        elementos,
+        2,
+        salida
     );
 
-    assert(estado == UI_LAYOUT_ARGUMENTO_INVALIDO);
+    comprobar(
+        estado == UI_LAYOUT_ARGUMENTO_INVALIDO,
+        "Rechazo de factores de crecimiento negativos"
+    );
 
-    puts("OK: pruebas iniciales de LatinoUI Layout");
-    return 0;
+    elementos[0].crecimiento = NAN;
+
+    estado = ui_distribuir(
+        contenedor,
+        UI_FILA,
+        20.0f,
+        10.0f,
+        elementos,
+        2,
+        salida
+    );
+
+    comprobar(
+        estado == UI_LAYOUT_ARGUMENTO_INVALIDO,
+        "Rechazo de valores no finitos"
+    );
+
+    comprobar(
+        ui_distribuir(
+            contenedor,
+            UI_FILA,
+            10.0f,
+            0.0f,
+            NULL,
+            0,
+            NULL
+        ) == UI_LAYOUT_OK,
+        "Contenedor sin elementos"
+    );
+
+    if (fallos == 0) {
+        puts("\nTodas las pruebas de LatinoUI Layout pasaron.");
+        return 0;
+    }
+
+    fprintf(stderr,
+        "\nFallaron %d comprobaciones.\n",
+        fallos
+    );
+
+    return 1;
 }
