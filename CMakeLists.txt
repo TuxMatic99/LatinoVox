@@ -172,3 +172,29 @@ if(BUILD_TESTING)
         COMMAND test_ui_contenedores_estabilidad
     )
 endif()
+
+# LatinoUI Tree: estructura jerárquica independiente
+add_library(latino_ui_arbol STATIC
+    src/ui/ui_arbol.c
+)
+
+target_include_directories(latino_ui_arbol
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+if(BUILD_TESTING)
+    add_executable(test_ui_arbol
+        tests/test_ui_arbol.c
+    )
+
+    target_link_libraries(test_ui_arbol
+        PRIVATE
+            latino_ui_arbol
+    )
+
+    add_test(
+        NAME latino_ui_arbol_basico
+        COMMAND test_ui_arbol
+    )
+endif()
