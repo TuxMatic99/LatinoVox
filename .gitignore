@@ -11,3 +11,6 @@ mundo_chunks_v08.dat
 
 # Ejecutable de pruebas manuales
 /tests/test_ui_layout
+
+# Respaldos locales de codigo fuente
+*.antes_filas
