@@ -56,6 +56,11 @@ target_include_directories(latino_ui_layout
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+target_link_libraries(motor
+    PRIVATE
+        latino_ui_layout
+)
+
 # Pruebas automatizadas
 include(CTest)
 

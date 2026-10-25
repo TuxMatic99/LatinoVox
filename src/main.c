@@ -4,6 +4,7 @@
 #include <math.h>
 #include <locale.h>
 #include "raylib.h"
+#include "ui_layout.h"
 
 // Cabeceras de Latino-Core
 #include "latino.h"
@@ -132,6 +133,8 @@ typedef struct {
     int min_val;
     int max_val;
     int valor;
+    // Rectángulo final compartido por dibujo e interacción.
+    Rectangle rect_calculado;
 } WidgetUI;
 
 typedef struct {
@@ -2363,6 +2366,129 @@ static Color aplicar_iluminacion_casilla(Color base, float oscuridad, float luz_
     return (Color){ (unsigned char)r, (unsigned char)g, (unsigned char)b, 255 };
 }
 
+
+/*
+ * Calcula la geometría de los widgets de la pestaña activa.
+ *
+ * Mantiene las alturas del diseño original, el espacio
+ * de 10 píxeles y el desplazamiento vertical existente.
+ *
+ * Las coordenadas resultantes son coordenadas de pantalla.
+ */
+static void actualizar_geometria_widgets(
+    Rectangle panel,
+    Rectangle area_scroll,
+    int font_w
+) {
+    UIElemento elementos[MAX_WIDGETS_UI];
+    UIRect rectangulos[MAX_WIDGETS_UI];
+    int indices[MAX_WIDGETS_UI];
+
+    size_t cantidad = 0;
+    float altura_total = 0.0f;
+
+    // 1. Medir los widgets visibles en la pestaña activa.
+    for (int i = 0; i < total_widgets_ui; i++) {
+        WidgetUI *w = &widgets_ui[i];
+
+        if (!w->activo || w->pestana != pestana_actual) {
+            continue;
+        }
+
+        bool foco = (
+            w->tipo == WIDGET_CAJA_TEXTO &&
+            id_caja_activa == w->id
+        );
+
+        int alto = font_w + 22;
+
+        if (w->tipo == WIDGET_ETIQUETA)
+            alto = font_w + 10;
+
+        if (w->tipo == WIDGET_CAJA_TEXTO)
+            alto = font_w * 2 + 26 + (foco ? 30 : 0);
+
+        if (w->tipo == WIDGET_DESLIZADOR)
+            alto = font_w * 2 + 24;
+
+        if (w->tipo == WIDGET_PROGRESO)
+            alto = font_w * 2 + 22;
+
+        if (w->tipo == WIDGET_INVENTARIO)
+            alto = (font_w + 16) * 3 + 12;
+
+        indices[cantidad] = i;
+        elementos[cantidad] = (UIElemento){
+            .base = (float)alto,
+            .crecimiento = 0.0f
+        };
+
+        altura_total += (float)alto;
+        cantidad++;
+    }
+
+    if (cantidad == 0) {
+        scroll_panel_y = 0.0f;
+        return;
+    }
+
+    // 2. Añadir las separaciones entre widgets.
+    const float separacion = 10.0f;
+
+    altura_total += (float)(cantidad - 1) * separacion;
+
+    // Mantener el desplazamiento dentro del contenido real.
+    float altura_visible = area_scroll.height - 16.0f;
+    if (altura_visible < 0.0f) altura_visible = 0.0f;
+    float scroll_min = altura_visible - altura_total;
+    if (scroll_min > 0.0f) scroll_min = 0.0f;
+    if (scroll_panel_y < scroll_min) scroll_panel_y = scroll_min;
+    if (scroll_panel_y > 0.0f) scroll_panel_y = 0.0f;
+
+    // 3. Usar la altura completa del contenido,
+    // no únicamente la altura visible del panel.
+    UIRect contenedor = {
+        .x = panel.x + 14.0f,
+        .y = area_scroll.y + scroll_panel_y + 8.0f,
+        .ancho = panel.width - 28.0f,
+        .alto = altura_total
+    };
+
+    if (contenedor.ancho < 0.0f)
+        contenedor.ancho = 0.0f;
+
+    // 4. Delegar la distribución a LatinoUI Layout.
+    UIResultado resultado = ui_distribuir(
+        contenedor,
+        UI_COLUMNA,
+        separacion,
+        0.0f,
+        elementos,
+        cantidad,
+        rectangulos
+    );
+
+    if (resultado != UI_LAYOUT_OK) {
+        // No utilizar coordenadas antiguas si falla el cálculo.
+        for (size_t n = 0; n < cantidad; n++) {
+            widgets_ui[indices[n]].rect_calculado =
+                (Rectangle){0};
+        }
+        return;
+    }
+
+    // 5. Almacenar las posiciones definitivas.
+    for (size_t n = 0; n < cantidad; n++) {
+        widgets_ui[indices[n]].rect_calculado = (Rectangle){
+            rectangulos[n].x,
+            rectangulos[n].y,
+            rectangulos[n].ancho,
+            rectangulos[n].alto
+        };
+    }
+}
+
+
 int main(void)
 {
     setlocale(LC_ALL, "C.UTF-8");
@@ -2695,6 +2821,7 @@ int main(void)
 
         const char *acentos_es[10] = { "á", "é", "í", "ó", "ú", "ñ", "Ñ", "¡", "¿", "ü" };
 
+
         if (!modal_activo && mostrar_panel_ui) {
             if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !raton_en_panel) {
                 id_caja_activa = -1;
@@ -2724,7 +2851,8 @@ int main(void)
                 }
             }
 
-            int cursor_y = (int)area_scroll_ui.y + (int)scroll_panel_y + 8;
+            actualizar_geometria_widgets(rect_panel_ui, area_scroll_ui, font_hud - 2);
+
             int font_w = font_hud - 2;
 
             for (int i = 0; i < total_widgets_ui; i++) {
@@ -2732,19 +2860,7 @@ int main(void)
                 if (!w->activo || w->pestana != pestana_actual) continue;
 
                 bool tiene_foco_caja = (w->tipo == WIDGET_CAJA_TEXTO && id_caja_activa == w->id);
-                int alto_item = font_w + 22;
-                if (w->tipo == WIDGET_ETIQUETA)   alto_item = font_w + 10;
-                if (w->tipo == WIDGET_CAJA_TEXTO) alto_item = (font_w * 2) + 26 + (tiene_foco_caja ? 30 : 0);
-                if (w->tipo == WIDGET_DESLIZADOR) alto_item = (font_w * 2) + 24;
-                if (w->tipo == WIDGET_PROGRESO)   alto_item = (font_w * 2) + 22;
-                if (w->tipo == WIDGET_INVENTARIO) alto_item = (font_w + 16) * 3 + 12;
-
-                Rectangle rect_item = {
-                    rect_panel_ui.x + 14.0f,
-                    (float)cursor_y,
-                    rect_panel_ui.width - 28.0f,
-                    (float)alto_item
-                };
+                Rectangle rect_item = w->rect_calculado;
 
                 bool visible = (rect_item.y + rect_item.height >= area_scroll_ui.y) &&
                                (rect_item.y <= area_scroll_ui.y + area_scroll_ui.height);
@@ -2805,6 +2921,7 @@ int main(void)
                     if (id_slider_arrastrando == w->id && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
                         float barra_x = rect_item.x + 10.0f;
                         float barra_w = rect_item.width - 20.0f;
+                        if (barra_w <= 0.0f) continue;
                         float ratio = (pos_raton.x - barra_x) / barra_w;
                         if (ratio < 0.0f) ratio = 0.0f;
                         if (ratio > 1.0f) ratio = 1.0f;
@@ -2817,7 +2934,7 @@ int main(void)
                     }
                 }
 
-                cursor_y += alto_item + 10;
+                
             }
         }
 
@@ -3282,34 +3399,22 @@ int main(void)
                 }
             }
 
+            // El evento de una pestaña o caja de texto puede cambiar el layout.
+            actualizar_geometria_widgets(rect_panel_ui, area_scroll_ui, font_hud - 2);
+
             BeginScissorMode(
                 (int)area_scroll_ui.x,
                 (int)area_scroll_ui.y,
                 (int)area_scroll_ui.width,
                 (int)area_scroll_ui.height
             );
-
-            int cursor_y = (int)area_scroll_ui.y + (int)scroll_panel_y + 8;
             int font_w = font_hud - 2;
 
             for (int i = 0; i < total_widgets_ui; i++) {
                 WidgetUI *w = &widgets_ui[i];
                 if (!w->activo || w->pestana != pestana_actual) continue;
-
                 bool tiene_foco_caja = (w->tipo == WIDGET_CAJA_TEXTO && id_caja_activa == w->id);
-                int alto_item = font_w + 22;
-                if (w->tipo == WIDGET_ETIQUETA)   alto_item = font_w + 10;
-                if (w->tipo == WIDGET_CAJA_TEXTO) alto_item = (font_w * 2) + 26 + (tiene_foco_caja ? 30 : 0);
-                if (w->tipo == WIDGET_DESLIZADOR) alto_item = (font_w * 2) + 24;
-                if (w->tipo == WIDGET_PROGRESO)   alto_item = (font_w * 2) + 22;
-                if (w->tipo == WIDGET_INVENTARIO) alto_item = (font_w + 16) * 3 + 12;
-
-                Rectangle rect_item = {
-                    rect_panel_ui.x + 14.0f,
-                    (float)cursor_y,
-                    rect_panel_ui.width - 28.0f,
-                    (float)alto_item
-                };
+                Rectangle rect_item = w->rect_calculado;
 
                 bool visible = (rect_item.y + rect_item.height >= area_scroll_ui.y) &&
                                (rect_item.y <= area_scroll_ui.y + area_scroll_ui.height);
@@ -3445,8 +3550,6 @@ int main(void)
                     DrawRectangle((int)r_bar.x, (int)r_bar.y, (int)(r_bar.width * ratio), (int)r_bar.height, (Color){ 50, 185, 95, 255 });
                     DrawRectangleLinesEx(r_bar, 1.5f, tema.borde_panel);
                 }
-
-                cursor_y += alto_item + 10;
             }
 
             EndScissorMode();
