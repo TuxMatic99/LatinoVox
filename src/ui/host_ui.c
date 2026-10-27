@@ -139,7 +139,8 @@ int main(void) {
     InitWindow(900, 600, ui.titulo);
     SetWindowMinSize(600, 400);
     SetTargetFPS(60);
-    while (!WindowShouldClose()) {
+    bool aviso_vm_comprometida = false;
+   while (!WindowShouldClose()) {
         UIRect area = {24.0f, 70.0f, (float)GetScreenWidth() - 48.0f,
                        (float)GetScreenHeight() - 110.0f};
         bool valido = lui_calcular(&ui, area);
@@ -171,7 +172,10 @@ int main(void) {
        UIDespachoResultado estado_frame =
            ui_despachador_procesar_frame(&despachador);
        if (estado_frame == UI_DESP_ERR_VM_COMPROMETIDA) {
-           fprintf(stderr, "LatinoUI: despachador bloqueado por fallo de VM\n");
+           if (!aviso_vm_comprometida) {
+               fprintf(stderr, "LatinoUI: despachador bloqueado por fallo de VM\n");
+               aviso_vm_comprometida = true;
+           }
        } else if (estado_frame == UI_DESP_ERR_CONTRATO) {
            fprintf(stderr, "LatinoUI: evento rechazado por contrato\n");
        } else if (estado_frame == UI_DESP_ERR_RELOJ) {
