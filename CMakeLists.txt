@@ -198,3 +198,19 @@ if(BUILD_TESTING)
         COMMAND test_ui_arbol
     )
 endif()
+
+# Pruebas de estabilidad de LatinoUI Tree
+if(BUILD_TESTING)
+    add_executable(test_ui_arbol_estabilidad
+        tests/test_ui_arbol_estabilidad.c
+    )
+
+    target_link_libraries(test_ui_arbol_estabilidad
+        PRIVATE latino_ui_arbol
+    )
+
+    add_test(
+        NAME latino_ui_arbol_estabilidad
+        COMMAND test_ui_arbol_estabilidad
+    )
+endif()
