@@ -214,3 +214,36 @@ if(BUILD_TESTING)
         COMMAND test_ui_arbol_estabilidad
     )
 endif()
+
+# LatinoUI: motor de geometría jerárquica
+add_library(latino_ui_layout_arbol STATIC
+    src/ui/ui_layout_arbol.c
+)
+
+target_include_directories(latino_ui_layout_arbol
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(latino_ui_layout_arbol
+    PUBLIC
+        latino_ui_arbol
+        latino_ui_layout
+)
+
+if(BUILD_TESTING)
+    add_executable(test_ui_layout_arbol
+        tests/test_ui_layout_arbol.c
+    )
+
+    target_link_libraries(test_ui_layout_arbol
+        PRIVATE
+            latino_ui_layout_arbol
+            m
+    )
+
+    add_test(
+        NAME latino_ui_layout_arbol_basico
+        COMMAND test_ui_layout_arbol
+    )
+endif()
