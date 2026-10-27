@@ -6,6 +6,7 @@
 #include "latmv.h"
 #include "latobj.h"
 #include "ui_runtime.h"
+#include "ui_eventos.h"
 
 static UIRuntime ui;
 static int siguiente_etiqueta = 10000;
@@ -53,6 +54,16 @@ static const lat_CReg libui[] = {
 int main(void) {
     const char *ruta = "scripts/app_ui.lat";
     if (!lui_inicializar(&ui)) return 1;
+
+    UIEvento memoria_eventos[64] = {0};
+    UIColaEventos cola_eventos = {0};
+
+    if (ui_eventos_inicializar(
+            &cola_eventos, memoria_eventos, 64)
+            != UI_EVENTOS_OK) {
+        fprintf(stderr, "Error al iniciar la cola\n");
+        return 1;
+    }
     lat_mv *mv = latC_crear_mv();
     if (!mv) { fprintf(stderr, "No se pudo crear VM\n"); return 1; }
     latC_abrir_liblatino(mv, "ui", libui);
@@ -98,13 +109,36 @@ int main(void) {
                 UIRect b = ui.rectangulos[i];
                 Rectangle r = {b.x, b.y, b.ancho, b.alto};
                 if (CheckCollisionPointRec(p, r)) {
-                    ultimo_clic = ui.nodos[i].id_widget;
-                    printf("LatinoUI: boton %d pulsado\n", ultimo_clic);
+                   UIEvento nuevo = {
+                       UI_EVENTO_CLIC,
+                       ui.nodos[i].id_widget
+                   };
+
+                   UIEventosResultado estado_cola =
+                       ui_eventos_encolar(&cola_eventos, nuevo);
+
+                   if (estado_cola != UI_EVENTOS_OK) {
+                       fprintf(stderr,
+                           "No se pudo encolar evento %d (codigo %d)\n",
+                           nuevo.id_widget, (int)estado_cola);
+                   }
                     break;
                 }
             }
         }
-        BeginDrawing();
+       UIEvento pendiente;
+
+       while (ui_eventos_desencolar(
+                  &cola_eventos, &pendiente)
+                  == UI_EVENTOS_OK) {
+           if (pendiente.tipo == UI_EVENTO_CLIC) {
+               ultimo_clic = pendiente.id_widget;
+               printf("LatinoUI: evento CLIC, boton %d\n",
+                      ultimo_clic);
+           }
+       }
+
+       BeginDrawing();
         ClearBackground(RAYWHITE);
         DrawText(ui.titulo, 24, 19, 28, DARKBLUE);
         if (!valido) {

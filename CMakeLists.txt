@@ -340,3 +340,9 @@ if(BUILD_TESTING)
         COMMAND test_ui_eventos
     )
 endif()
+
+# Integracion de eventos con el host autonomo
+target_link_libraries(host_ui
+    PRIVATE
+        latino_ui_eventos
+)
