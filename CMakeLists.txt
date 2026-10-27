@@ -314,3 +314,29 @@ if(BUILD_TESTING)
         COMMAND test_ui_runtime
     )
 endif()
+
+# LatinoUI: sistema independiente de eventos
+add_library(latino_ui_eventos STATIC
+    src/ui/ui_eventos.c
+)
+
+target_include_directories(latino_ui_eventos
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+if(BUILD_TESTING)
+    add_executable(test_ui_eventos
+        tests/test_ui_eventos.c
+    )
+
+    target_link_libraries(test_ui_eventos
+        PRIVATE
+            latino_ui_eventos
+    )
+
+    add_test(
+        NAME latino_ui_eventos_basico
+        COMMAND test_ui_eventos
+    )
+endif()
