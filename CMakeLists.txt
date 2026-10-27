@@ -386,3 +386,9 @@ if(BUILD_TESTING)
     add_test(NAME latino_ui_despachador_error COMMAND test_ui_despachador_error)
     set_tests_properties(latino_ui_despachador_error PROPERTIES TIMEOUT 10)
 endif()
+
+# Integracion real del host con FIFO, despachador y callbacks Latino
+target_link_libraries(host_ui PRIVATE
+    latino_ui_despachador
+    latino_ui_callbacks
+)

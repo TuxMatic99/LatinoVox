@@ -7,9 +7,33 @@
 #include "latobj.h"
 #include "ui_runtime.h"
 #include "ui_eventos.h"
+#include "ui_callbacks.h"
+#include "ui_despachador.h"
 
 static UIRuntime ui;
 static int siguiente_etiqueta = 10000;
+
+static int *ultimo_clic_ptr = NULL;
+
+/* El despachador es independiente de Latino; este adaptador traduce
+   los estados del puente FFI al contrato del despachador. */
+static UIDespachoCallbackResultado host_despachar_clic(void *usuario, int id)
+{
+    UICBContexto *cb = (UICBContexto *)usuario;
+    UICBResultado r = ui_cb_despachar(cb, "__ui_despachar", id);
+    if (r == UI_CB_OK) {
+        if (ultimo_clic_ptr) *ultimo_clic_ptr = id;
+        return UI_CB_DESP_OK;
+    }
+    if (r == UI_CB_FUNCION_INEXISTENTE || r == UI_CB_FIRMA_INVALIDA ||
+        r == UI_CB_ARGUMENTO_INVALIDO) {
+        fprintf(stderr, "LatinoUI: callback rechazado (codigo %d)\n", (int)r);
+        return UI_CB_DESP_CONTRATO;
+    }
+    fprintf(stderr, "LatinoUI: VM no reutilizable (codigo %d)\n", (int)r);
+    return UI_CB_DESP_VM_ERROR;
+}
+
 
 static void n_titulo(lat_mv *mv) {
     const char *texto = latC_checar_cadena(mv, latC_desapilar(mv));
@@ -67,6 +91,24 @@ int main(void) {
     lat_mv *mv = latC_crear_mv();
     if (!mv) { fprintf(stderr, "No se pudo crear VM\n"); return 1; }
     latC_abrir_liblatino(mv, "ui", libui);
+    UICBContexto callbacks = {0};
+    UIDespachador despachador = {0};
+    int ultimo_clic = -1;
+    ultimo_clic_ptr = &ultimo_clic;
+    if (ui_cb_inicializar(&callbacks, mv) != UI_CB_OK ||
+        ui_cb_registrar(&callbacks) != UI_CB_OK) {
+        fprintf(stderr, "LatinoUI: no se pudo registrar ui_cb\n");
+        latC_destruir_mv(mv);
+        return 1;
+    }
+    if (ui_despachador_inicializar(&despachador, &cola_eventos,
+                                  host_despachar_clic, &callbacks) != UI_DESP_OK) {
+        fprintf(stderr, "LatinoUI: no se pudo iniciar despachador\n");
+        ui_cb_desregistrar(&callbacks);
+        latC_destruir_mv(mv);
+        return 1;
+    }
+
     mv->nombre_archivo = (char *)ruta;
     mv->global->REPL = false;
     int estado = 0;
@@ -97,7 +139,6 @@ int main(void) {
     InitWindow(900, 600, ui.titulo);
     SetWindowMinSize(600, 400);
     SetTargetFPS(60);
-    int ultimo_clic = -1;
     while (!WindowShouldClose()) {
         UIRect area = {24.0f, 70.0f, (float)GetScreenWidth() - 48.0f,
                        (float)GetScreenHeight() - 110.0f};
@@ -114,10 +155,10 @@ int main(void) {
                        ui.nodos[i].id_widget
                    };
 
-                   UIEventosResultado estado_cola =
-                       ui_eventos_encolar(&cola_eventos, nuevo);
+                   UIDespachoResultado estado_cola =
+                       ui_despachador_encolar(&despachador, nuevo);
 
-                   if (estado_cola != UI_EVENTOS_OK) {
+                   if (estado_cola != UI_DESP_OK) {
                        fprintf(stderr,
                            "No se pudo encolar evento %d (codigo %d)\n",
                            nuevo.id_widget, (int)estado_cola);
@@ -126,17 +167,17 @@ int main(void) {
                 }
             }
         }
-       UIEvento pendiente;
 
-       while (ui_eventos_desencolar(
-                  &cola_eventos, &pendiente)
-                  == UI_EVENTOS_OK) {
-           if (pendiente.tipo == UI_EVENTO_CLIC) {
-               ultimo_clic = pendiente.id_widget;
-               printf("LatinoUI: evento CLIC, boton %d\n",
-                      ultimo_clic);
-           }
+       UIDespachoResultado estado_frame =
+           ui_despachador_procesar_frame(&despachador);
+       if (estado_frame == UI_DESP_ERR_VM_COMPROMETIDA) {
+           fprintf(stderr, "LatinoUI: despachador bloqueado por fallo de VM\n");
+       } else if (estado_frame == UI_DESP_ERR_CONTRATO) {
+           fprintf(stderr, "LatinoUI: evento rechazado por contrato\n");
+       } else if (estado_frame == UI_DESP_ERR_RELOJ) {
+           fprintf(stderr, "LatinoUI: reloj del despachador no disponible\n");
        }
+
 
        BeginDrawing();
         ClearBackground(RAYWHITE);
@@ -163,6 +204,14 @@ int main(void) {
         EndDrawing();
     }
     CloseWindow();
+    ui_cb_desregistrar(&callbacks);
+    ultimo_clic_ptr = NULL;
+    if (despachador.estado_vm == UI_VM_COMPROMETIDA || callbacks.inutilizada) {
+        /* Tras longjmp, Latino no garantiza liberar con seguridad esta VM.
+           El SO recuperara los recursos al terminar el proceso. */
+        fprintf(stderr, "LatinoUI: cierre con VM comprometida; se omite destructor\n");
+        return 1;
+    }
     latC_destruir_mv(mv);
     return 0;
 }
