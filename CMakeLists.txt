@@ -346,3 +346,24 @@ target_link_libraries(host_ui
     PRIVATE
         latino_ui_eventos
 )
+
+# Añadir UNA vez al final de CMakeLists.txt (dentro del proyecto LatinoVox).
+# Requiere LATINO_INCLUDE_DIR y LATINO_LIBRARY ya definidos por el proyecto.
+
+add_library(latino_ui_callbacks STATIC src/ui/ui_callbacks.c)
+target_include_directories(latino_ui_callbacks PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${LATINO_INCLUDE_DIR}
+)
+target_link_libraries(latino_ui_callbacks PUBLIC ${LATINO_LIBRARY})
+
+if(BUILD_TESTING)
+    add_executable(test_ui_callbacks tests/test_ui_callbacks.c)
+    target_include_directories(test_ui_callbacks PRIVATE ${LATINO_INCLUDE_DIR})
+    target_link_libraries(test_ui_callbacks PRIVATE latino_ui_callbacks m)
+    add_test(NAME latino_ui_callbacks_trampolin
+        COMMAND test_ui_callbacks
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/prueba_callbacks.lat")
+endif()
+
+# NO vincular todavía host_ui ni modificar src/main.c.

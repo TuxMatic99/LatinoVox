@@ -1,0 +1,17 @@
+# Prueba de despacho C -> Latino sin parametros directos.
+funcion manejar_clic(id)
+    si (id == 1)
+        prueba.registrar(id, 10)
+    sino
+        si (id == 2)
+            prueba.registrar(id, 20)
+        sino
+            prueba.registrar(id, 90)
+        fin
+    fin
+fin
+
+funcion __ui_despachar()
+    identificador = ui_cb.id_actual()
+    manejar_clic(identificador)
+fin
