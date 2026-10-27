@@ -1,3 +1,9 @@
-
-ui.titulo("LatinoUI - Primera Aplicación")
-ui.etiqueta("Hola desde el Lenguaje Latino")
+ui.titulo("LatinoUI - Interfaz desde Latino")
+ui.iniciar_columna(12)
+    ui.etiqueta("Panel principal")
+    ui.iniciar_fila(10)
+        ui.boton(1, "Guardar")
+        ui.boton(2, "Cancelar")
+    ui.fin_contenedor()
+    ui.etiqueta("Distribucion calculada desde Latino")
+ui.fin_contenedor()

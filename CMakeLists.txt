@@ -277,3 +277,40 @@ target_link_libraries(host_ui
         ${LATINO_LIBRARY}
         m
 )
+
+# LatinoUI Runtime: administracion independiente de widgets
+add_library(latino_ui_runtime STATIC
+    src/ui/ui_runtime.c
+)
+
+target_include_directories(latino_ui_runtime
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(latino_ui_runtime
+    PUBLIC
+        latino_ui_layout_arbol
+)
+
+target_link_libraries(host_ui
+    PRIVATE
+        latino_ui_runtime
+)
+
+if(BUILD_TESTING)
+    add_executable(test_ui_runtime
+        tests/test_ui_runtime.c
+    )
+
+    target_link_libraries(test_ui_runtime
+        PRIVATE
+            latino_ui_runtime
+            m
+    )
+
+    add_test(
+        NAME latino_ui_runtime_basico
+        COMMAND test_ui_runtime
+    )
+endif()

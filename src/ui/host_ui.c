@@ -1,104 +1,134 @@
-
+#include <math.h>
 #include <stdio.h>
-#include <string.h>
-
 #include "raylib.h"
 #include "latino.h"
 #include "latast.h"
 #include "latmv.h"
 #include "latobj.h"
+#include "ui_runtime.h"
 
-#define UI_TEXTO_MAX 256
+static UIRuntime ui;
+static int siguiente_etiqueta = 10000;
 
-static char titulo[UI_TEXTO_MAX] = "LatinoUI";
-static char etiqueta[UI_TEXTO_MAX] = "Bienvenido";
-
-static void ui_titulo(lat_mv *mv)
-{
-    lat_objeto *obj = latC_desapilar(mv);
-    const char *texto = latC_checar_cadena(mv, obj);
-
-    if (texto != NULL) {
-        snprintf(titulo, sizeof(titulo), "%s", texto);
-    }
+static void n_titulo(lat_mv *mv) {
+    const char *texto = latC_checar_cadena(mv, latC_desapilar(mv));
+    (void)lui_titulo(&ui, texto);
 }
-
-static void ui_etiqueta(lat_mv *mv)
-{
-    lat_objeto *obj = latC_desapilar(mv);
-    const char *texto = latC_checar_cadena(mv, obj);
-
-    if (texto != NULL) {
-        snprintf(etiqueta, sizeof(etiqueta), "%s", texto);
-    }
+static void n_etiqueta(lat_mv *mv) {
+    const char *texto = latC_checar_cadena(mv, latC_desapilar(mv));
+    (void)lui_agregar_widget(&ui, siguiente_etiqueta++, texto);
 }
+static void n_boton(lat_mv *mv) {
+    lat_objeto *o_texto = latC_desapilar(mv);
+    lat_objeto *o_id = latC_desapilar(mv);
+    const char *texto = latC_checar_cadena(mv, o_texto);
+    double n = latC_checar_numerico(mv, o_id);
+    if (!isfinite(n) || n < 0 || n >= 10000 || floor(n) != n) {
+        fprintf(stderr, "LatinoUI: identificador de boton invalido\n");
+        (void)lui_agregar_widget(&ui, -1, texto); /* establece error */
+        return;
+    }
+    (void)lui_agregar_widget(&ui, (int)n, texto);
+}
+static void n_fila(lat_mv *mv) {
+    double espacio = latC_checar_numerico(mv, latC_desapilar(mv));
+    (void)lui_iniciar_contenedor(&ui, UI_NODO_FILA, (float)espacio);
+}
+static void n_columna(lat_mv *mv) {
+    double espacio = latC_checar_numerico(mv, latC_desapilar(mv));
+    (void)lui_iniciar_contenedor(&ui, UI_NODO_COLUMNA, (float)espacio);
+}
+static void n_fin(lat_mv *mv) { (void)mv; (void)lui_fin_contenedor(&ui); }
 
 static const lat_CReg libui[] = {
-    {"titulo", ui_titulo, 1},
-    {"etiqueta", ui_etiqueta, 1},
+    {"titulo", n_titulo, 1},
+    {"etiqueta", n_etiqueta, 1},
+    {"boton", n_boton, 2},
+    {"iniciar_fila", n_fila, 1},
+    {"iniciar_columna", n_columna, 1},
+    {"fin_contenedor", n_fin, 0},
     {NULL, NULL, 0}
 };
 
-int main(void)
-{
+int main(void) {
     const char *ruta = "scripts/app_ui.lat";
-
+    if (!lui_inicializar(&ui)) return 1;
     lat_mv *mv = latC_crear_mv();
-
-    if (mv == NULL) {
-        fprintf(stderr, "Error al crear la VM de Latino\n");
-        return 1;
-    }
-
+    if (!mv) { fprintf(stderr, "No se pudo crear VM\n"); return 1; }
     latC_abrir_liblatino(mv, "ui", libui);
-
     mv->nombre_archivo = (char *)ruta;
     mv->global->REPL = false;
-
     int estado = 0;
     ast *nodo = latA_analizar_arch((char *)ruta, &estado);
-
-    if (estado != 0 || nodo == NULL) {
-        fprintf(stderr, "Error al analizar %s\n", ruta);
-        if (nodo != NULL) {
-            latA_destruir(nodo);
-        }
+    if (estado || !nodo) {
+        fprintf(stderr, "No se pudo analizar %s\n", ruta);
+        if (nodo) latA_destruir(nodo);
         latC_destruir_mv(mv);
         return 1;
     }
-
     lat_objeto *funcion = latC_analizar(mv, nodo);
-
-    if (funcion == NULL) {
-        fprintf(stderr, "Error al preparar el script\n");
+    if (!funcion) {
+        fprintf(stderr, "No se pudo preparar script\n");
         latA_destruir(nodo);
         latC_destruir_mv(mv);
         return 1;
     }
-
     int resultado = latC_llamar_funcion(mv, funcion);
-
     latO_destruir(mv, funcion);
     latA_destruir(nodo);
-
-    if (resultado != 0) {
-        fprintf(stderr, "Error al ejecutar el script\n");
+    if (resultado || !lui_validar(&ui)) {
+        fprintf(stderr, "LatinoUI: fallo en script o estructura: %s\n", ui.error);
         latC_destruir_mv(mv);
         return 1;
     }
 
-    InitWindow(900, 600, titulo);
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+    InitWindow(900, 600, ui.titulo);
+    SetWindowMinSize(600, 400);
     SetTargetFPS(60);
-
+    int ultimo_clic = -1;
     while (!WindowShouldClose()) {
+        UIRect area = {24.0f, 70.0f, (float)GetScreenWidth() - 48.0f,
+                       (float)GetScreenHeight() - 110.0f};
+        bool valido = lui_calcular(&ui, area);
+        if (valido && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            Vector2 p = GetMousePosition();
+            for (size_t i = 0; i < ui.arbol.cantidad; i++) {
+                if (ui.nodos[i].tipo != UI_NODO_WIDGET || ui.nodos[i].id_widget >= 10000) continue;
+                UIRect b = ui.rectangulos[i];
+                Rectangle r = {b.x, b.y, b.ancho, b.alto};
+                if (CheckCollisionPointRec(p, r)) {
+                    ultimo_clic = ui.nodos[i].id_widget;
+                    printf("LatinoUI: boton %d pulsado\n", ultimo_clic);
+                    break;
+                }
+            }
+        }
         BeginDrawing();
         ClearBackground(RAYWHITE);
-        DrawText(etiqueta, 60, 100, 28, DARKBLUE);
+        DrawText(ui.titulo, 24, 19, 28, DARKBLUE);
+        if (!valido) {
+            DrawText("Espacio insuficiente para layout", 24, 85, 24, MAROON);
+        } else {
+            for (size_t i = 0; i < ui.arbol.cantidad; i++) {
+                UIRect b = ui.rectangulos[i];
+                Rectangle r = {b.x, b.y, b.ancho, b.alto};
+                if (ui.nodos[i].tipo == UI_NODO_WIDGET) {
+                    bool boton = ui.nodos[i].id_widget < 10000;
+                    DrawRectangleRec(r, boton ? SKYBLUE : (Color){231, 239, 247, 255});
+                    DrawRectangleLinesEx(r, 1.0f, GRAY);
+                    BeginScissorMode((int)r.x, (int)r.y, (int)r.width, (int)r.height);
+                    DrawText(ui.textos[i], (int)b.x + 9, (int)b.y + 8, 24, DARKBLUE);
+                    EndScissorMode();
+                } else {
+                    DrawRectangleLinesEx(r, 1.0f, LIGHTGRAY);
+                }
+            }
+        }
+        DrawText(TextFormat("Ultimo clic: %d", ultimo_clic), 24, GetScreenHeight() - 31, 20, DARKGRAY);
         EndDrawing();
     }
-
     CloseWindow();
     latC_destruir_mv(mv);
-
     return 0;
 }
