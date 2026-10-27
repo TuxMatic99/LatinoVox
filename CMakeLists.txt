@@ -247,3 +247,15 @@ if(BUILD_TESTING)
         COMMAND test_ui_layout_arbol
     )
 endif()
+
+# Demostración visual independiente de LatinoUI Tree
+add_executable(demo_ui_layout_arbol
+    tests/demo_ui_layout_arbol.c
+)
+
+target_link_libraries(demo_ui_layout_arbol
+    PRIVATE
+        latino_ui_layout_arbol
+        raylib
+        m
+)
