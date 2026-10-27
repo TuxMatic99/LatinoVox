@@ -259,3 +259,21 @@ target_link_libraries(demo_ui_layout_arbol
         raylib
         m
 )
+
+
+# Primera aplicación autónoma de LatinoUI
+add_executable(host_ui
+    src/ui/host_ui.c
+)
+
+target_include_directories(host_ui
+    PRIVATE
+        ${LATINO_INCLUDE_DIR}
+)
+
+target_link_libraries(host_ui
+    PRIVATE
+        raylib
+        ${LATINO_LIBRARY}
+        m
+)

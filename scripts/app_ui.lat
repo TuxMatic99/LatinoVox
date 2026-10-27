@@ -1,0 +1,3 @@
+
+ui.titulo("LatinoUI - Primera Aplicación")
+ui.etiqueta("Hola desde el Lenguaje Latino")
