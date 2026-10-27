@@ -14,3 +14,5 @@ mundo_chunks_v08.dat
 
 # Respaldos locales de codigo fuente
 *.antes_filas
+
+/build-asan/
