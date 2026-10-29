@@ -1,0 +1,3 @@
+# Error de estructura de UI, sin provocar un longjmp de Latino-Core.
+ui.titulo("Estructura invalida")
+ui.boton(7, "Boton fuera de contenedor")

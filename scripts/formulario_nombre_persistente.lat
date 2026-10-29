@@ -1,0 +1,79 @@
+# Formato nombre-v1.txt: un nombre UTF-8, sin salto final, maximo 255 bytes.
+# Ejecutar el lanzador probar_persistencia_ui.sh para usar un directorio propio.
+ui.titulo("LatinoUI - Nombre persistente")
+ui.iniciar_columna(12)
+    ui.etiqueta("Nombre")
+    ui.campo_texto(3, "")
+    ui.iniciar_fila(10)
+        ui.boton(1, "Guardar")
+        ui.boton(2, "Cancelar")
+    ui.fin_contenedor()
+    ui.etiqueta_id(4, "Preparando formulario.")
+ui.fin_contenedor()
+
+permiso_guardar = verdadero
+contenido_inicial = archivo.leer_texto_seguro("nombre-v1.txt")
+si (tipo(contenido_inicial) == "cadena")
+    actualizado = ui.poner_texto(3, contenido_inicial)
+    si (actualizado)
+        actualizado = ui.poner_texto(4, "Nombre recuperado del archivo.")
+    sino
+        permiso_guardar = falso
+        actualizado = ui.poner_texto(4, "Archivo invalido. No se sobrescribira en esta sesion.")
+    fin
+osi (tipo(contenido_inicial) == "nulo")
+    actualizado = ui.poner_texto(4, "Primer uso: escribe tu nombre y pulsa Guardar.")
+sino
+    permiso_guardar = falso
+    actualizado = ui.poner_texto(4, "No se pudo leer el archivo. Guardado bloqueado.")
+fin
+
+funcion guardar_nombre()
+    si (permiso_guardar)
+        nombre_limpio = cadena.recortar(ui.texto(3))
+        actualizado = ui.poner_texto(3, nombre_limpio)
+        si (ui.longitud_texto(3) < 2)
+            actualizado = ui.poner_texto(4, "Escribe un nombre de al menos dos caracteres.")
+        sino
+            estado_guardado = archivo.escribir_atomico("nombre-v1.txt", nombre_limpio)
+            si (estado_guardado == 1)
+                actualizado = ui.poner_texto(4, "Nombre guardado. Puedes cerrar y volver a abrir.")
+            osi (estado_guardado == 2)
+                actualizado = ui.poner_texto(4, "Nombre guardado; hubo un problema al finalizar. Revisa el registro.")
+            sino
+                actualizado = ui.poner_texto(4, "No se guardo. El archivo anterior se conserva.")
+            fin
+        fin
+    sino
+        actualizado = ui.poner_texto(4, "Guardado bloqueado. Revisa el archivo antes de reabrir.")
+    fin
+fin
+
+funcion cancelar_edicion()
+    recuperado = archivo.leer_texto_seguro("nombre-v1.txt")
+    si (tipo(recuperado) == "cadena")
+        actualizado = ui.poner_texto(3, recuperado)
+        si (actualizado)
+            actualizado = ui.poner_texto(4, "Cambios descartados. Ultimo nombre guardado recuperado.")
+        sino
+            actualizado = ui.poner_texto(4, "No se pudo restaurar: contenido invalido.")
+        fin
+    osi (tipo(recuperado) == "nulo")
+        actualizado = ui.poner_texto(3, "")
+        actualizado = ui.poner_texto(4, "Edicion cancelada. Aun no hay un nombre guardado.")
+    sino
+        actualizado = ui.poner_texto(4, "No se pudo leer el archivo. Se conserva la edicion.")
+    fin
+fin
+
+funcion __ui_despachar()
+    identificador = ui_cb.id_actual()
+    ev_tipo = ui_cb.tipo_actual()
+    si ((identificador == 1 && ev_tipo == 1) || (identificador == 3 && ev_tipo == 2))
+        guardar_nombre()
+    osi (identificador == 2 && ev_tipo == 1)
+        cancelar_edicion()
+    osi (ev_tipo == 3)
+        actualizado = ui.poner_texto(4, "Edicion actual restaurada; el archivo no ha cambiado.")
+    fin
+fin

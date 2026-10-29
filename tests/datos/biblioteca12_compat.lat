@@ -1,0 +1,115 @@
+# Biblioteca12: interfaz y acciones en Latino; un solo catalogo en biblioteca.*.
+# Ruta relativa al directorio privado elegido por probar_biblioteca_ui.sh.
+confirmar_id = 0
+ui.titulo("Biblioteca12 - LatinoUI")
+ui.iniciar_columna(5)
+    ui.etiqueta_id(300, "Biblioteca")
+    ui.iniciar_fila(8)
+        ui.etiqueta("Buscar")
+        ui.campo_texto(100, "")
+        ui.boton(210, "Buscar")
+        ui.boton(211, "Anterior")
+        ui.boton(212, "Siguiente")
+    ui.fin_contenedor()
+    ui.iniciar_fila(8)
+        ui.etiqueta("Codigo")
+        ui.campo_texto(101, "")
+        ui.etiqueta("Anio")
+        ui.campo_texto(104, "")
+    ui.fin_contenedor()
+    ui.iniciar_fila(8)
+        ui.etiqueta("Titulo")
+        ui.campo_texto(102, "")
+    ui.fin_contenedor()
+    ui.iniciar_fila(8)
+        ui.etiqueta("Autor")
+        ui.campo_texto(103, "")
+    ui.fin_contenedor()
+    ui.iniciar_fila(8)
+        ui.boton(213, "Nuevo")
+        ui.boton(201, "Registrar")
+        ui.boton(202, "Actualizar")
+        ui.boton(203, "Eliminar")
+        ui.boton(204, "Cancelar")
+    ui.fin_contenedor()
+    ui.etiqueta_id(302, "Preparando catalogo.")
+ui.fin_contenedor()
+
+funcion refrescar_ficha()
+    puesto = ui.poner_texto(101, biblioteca.campo(0))
+    puesto = ui.poner_texto(102, biblioteca.campo(1))
+    puesto = ui.poner_texto(103, biblioteca.campo(2))
+    puesto = ui.poner_texto(104, biblioteca.campo(3))
+    puesto = ui.poner_texto(300, "Libros: " .. biblioteca.total() .. " | ID seleccionado: " .. biblioteca.seleccion())
+fin
+
+funcion guardar_ficha(es_edicion)
+    codigo_ficha = cadena.recortar(ui.texto(101))
+    titulo_ficha = cadena.recortar(ui.texto(102))
+    autor_ficha = cadena.recortar(ui.texto(103))
+    anio_ficha = cadena.recortar(ui.texto(104))
+    si (es_edicion)
+        resultado_ficha = biblioteca.actualizar(codigo_ficha, titulo_ficha, autor_ficha, anio_ficha)
+    sino
+        resultado_ficha = biblioteca.registrar(codigo_ficha, titulo_ficha, autor_ficha, anio_ficha)
+    fin
+    si (resultado_ficha >= 0)
+        refrescar_ficha()
+    fin
+    puesto = ui.poner_texto(302, biblioteca.mensaje())
+fin
+
+funcion __ui_despachar()
+    evento_id = ui_cb.id_actual()
+    evento_tipo = ui_cb.tipo_actual()
+    si (evento_tipo == 3 || (evento_tipo == 1 && evento_id == 204))
+        confirmar_id = 0
+        refrescar_ficha()
+        puesto = ui.poner_texto(302, "Edicion y confirmacion canceladas.")
+    osi (evento_tipo == 1 || evento_tipo == 2)
+        si (evento_id != 203)
+            confirmar_id = 0
+        fin
+        si (evento_id == 201)
+            guardar_ficha(falso)
+        osi (evento_id == 202)
+            guardar_ficha(verdadero)
+        osi (evento_id == 203)
+            si (biblioteca.seleccion() == 0)
+                puesto = ui.poner_texto(302, "Selecciona un libro antes de eliminar.")
+            osi (confirmar_id != biblioteca.seleccion())
+                confirmar_id = biblioteca.seleccion()
+                puesto = ui.poner_texto(302, "Pulsa Eliminar otra vez para confirmar, o Cancelar.")
+            sino
+                resultado_borrado = biblioteca.eliminar()
+                confirmar_id = 0
+                si (resultado_borrado >= 0)
+                    refrescar_ficha()
+                fin
+                puesto = ui.poner_texto(302, biblioteca.mensaje())
+            fin
+        osi (evento_id == 210 || (evento_id == 100 && evento_tipo == 2))
+            encontrado = biblioteca.buscar(cadena.recortar(ui.texto(100)))
+            si (encontrado > 0)
+                refrescar_ficha()
+            fin
+            puesto = ui.poner_texto(302, biblioteca.mensaje())
+        osi (evento_id == 211 || evento_id == 212)
+            si (evento_id == 211)
+                movido = biblioteca.mover(-1)
+            sino
+                movido = biblioteca.mover(1)
+            fin
+            refrescar_ficha()
+            puesto = ui.poner_texto(302, "Navegacion del catalogo.")
+        osi (evento_id == 213)
+            cambiado = biblioteca.seleccionar(0)
+            refrescar_ficha()
+            puesto = ui.poner_texto(302, "Nueva ficha. Completa los campos y pulsa Registrar.")
+        fin
+    fin
+fin
+
+resultado_apertura = biblioteca.abrir("catalogo-v1.tsv")
+refrescar_ficha()
+inicio_puesto = ui.poner_texto(302, biblioteca.mensaje())

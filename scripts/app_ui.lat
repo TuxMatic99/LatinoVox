@@ -1,0 +1,27 @@
+ui.titulo("LatinoUI - Interfaz desde Latino")
+ui.iniciar_columna(12)
+    ui.etiqueta("Panel principal")
+    ui.iniciar_fila(10)
+        ui.boton(1, "Guardar")
+        ui.boton(2, "Cancelar")
+    ui.fin_contenedor()
+    ui.etiqueta("Distribucion calculada desde Latino")
+ui.fin_contenedor()
+
+
+# El host llama a __ui_despachar() sin argumentos desde C.
+# El ID numérico llega mediante la FFI ui_cb.id_actual().
+funcion manejar_clic(id)
+    si (id == 1)
+        escribir("[LatinoUI] Guardar: boton 1")
+    osi (id == 2)
+        escribir("[LatinoUI] Cancelar: boton 2")
+    sino
+        escribir("[LatinoUI] Evento no reconocido")
+    fin
+fin
+
+funcion __ui_despachar()
+    identificador = ui_cb.id_actual()
+    manejar_clic(identificador)
+fin
