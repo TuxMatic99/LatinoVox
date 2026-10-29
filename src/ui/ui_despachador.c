@@ -64,7 +64,7 @@ static bool leer_reloj(UIDespachador *d, double *t)
 
 UIDespachoResultado ui_despachador_procesar_frame(UIDespachador *d)
 {
-    if (!d || !d->cola || !d->callback || !d->reloj ||
+    if (!d || !d->cola || (!d->callback && !d->callback_evento) || !d->reloj ||
         !d->max_eventos_frame || !isfinite(d->presupuesto_ms) ||
         d->presupuesto_ms <= 0.0) return UI_DESP_ERR_ARGUMENTO;
     if (d->estado_vm == UI_VM_COMPROMETIDA) return UI_DESP_ERR_VM_COMPROMETIDA;
@@ -97,12 +97,19 @@ UIDespachoResultado ui_despachador_procesar_frame(UIDespachador *d)
         }
         d->metricas.eventos_consumidos++;
         procesados++;
-        if (evento.tipo != UI_EVENTO_CLIC) {
+        if (!d->callback_evento && evento.tipo != UI_EVENTO_CLIC) {
             d->metricas.errores_contrato++;
             resultado = UI_DESP_ERR_CONTRATO;
             break;
         }
-        UIDespachoCallbackResultado r = d->callback(d->usuario_callback, evento.id_widget);
+        double inicio_callback=ahora;
+        UIDespachoCallbackResultado r = d->callback_evento
+            ? d->callback_evento(d->usuario_callback, evento)
+            : d->callback(d->usuario_callback, evento.id_widget);
+        double fin_callback;
+        if (leer_reloj(d,&fin_callback) && fin_callback>=inicio_callback &&
+            fin_callback-inicio_callback>d->metricas.max_callback_ms)
+            d->metricas.max_callback_ms=fin_callback-inicio_callback;
         if (r == UI_CB_DESP_OK) {
             d->metricas.eventos_despachados++;
         } else if (r == UI_CB_DESP_CONTRATO) {
@@ -121,4 +128,16 @@ UIDespachoResultado ui_despachador_procesar_frame(UIDespachador *d)
     d->metricas.pendientes_ultimo_frame = ui_eventos_cantidad(d->cola);
     d->estado_despachador = UI_DESP_LIBRE;
     return resultado;
+}
+
+static UIDespachoCallbackResultado sin_uso(void *u, int id) {
+    (void)u; (void)id; return UI_CB_DESP_CONTRATO;
+}
+UIDespachoResultado ui_despachador_inicializar_eventos(
+    UIDespachador *desp, UIColaEventos *cola,
+    UIDespachoEventoCallback callback, void *usuario_callback) {
+    if (!callback) return UI_DESP_ERR_ARGUMENTO;
+    UIDespachoResultado r=ui_despachador_inicializar(desp,cola,sin_uso,usuario_callback);
+    if (r==UI_DESP_OK) { desp->callback=NULL; desp->callback_evento=callback; }
+    return r;
 }

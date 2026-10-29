@@ -1,0 +1,35 @@
+# Formulario de referencia. Guardar confirma en memoria; no escribe en disco.
+ui.titulo("LatinoUI - Formulario de nombre")
+ui.iniciar_columna(12)
+    ui.etiqueta("Nombre")
+    ui.campo_texto(3, "María Ñáñez")
+    ui.iniciar_fila(10)
+        ui.boton(1, "Guardar")
+        ui.boton(2, "Cancelar")
+    ui.fin_contenedor()
+    ui.etiqueta_id(4, "Tab cambia el foco. Enter confirma. Escape restaura la edición.")
+ui.fin_contenedor()
+
+funcion guardar_nombre()
+    nombre_limpio = cadena.recortar(ui.texto(3))
+    actualizado = ui.poner_texto(3, nombre_limpio)
+    si (ui.longitud_texto(3) < 2)
+        actualizado = ui.poner_texto(4, "Escribe un nombre de al menos dos caracteres.")
+    sino
+        actualizado = ui.poner_texto(4, nombre_limpio)
+    fin
+fin
+
+funcion __ui_despachar()
+    identificador = ui_cb.id_actual()
+    ev_tipo = ui_cb.tipo_actual()
+    # Tipos: 1 clic, 2 Enter en campo, 3 Escape en campo.
+    si ((identificador == 1 && ev_tipo == 1) || (identificador == 3 && ev_tipo == 2))
+        guardar_nombre()
+    osi (identificador == 2 && ev_tipo == 1)
+        actualizado = ui.poner_texto(3, "")
+        actualizado = ui.poner_texto(4, "Formulario cancelado.")
+    osi (ev_tipo == 3)
+        actualizado = ui.poner_texto(4, "Edición cancelada.")
+    fin
+fin

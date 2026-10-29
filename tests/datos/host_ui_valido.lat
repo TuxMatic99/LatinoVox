@@ -1,0 +1,13 @@
+ui.titulo("Prueba de host09")
+ui.iniciar_columna(8)
+    ui.boton(7, "Probar callback")
+    ui.etiqueta("Programa cargado desde la ruta indicada")
+ui.fin_contenedor()
+
+funcion __ui_despachar()
+    si (ui_cb.id_actual() == 7)
+        ui.titulo("Callback correcto")
+    sino
+        ui.titulo("Callback incorrecto")
+    fin
+fin

@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "latino.h"
+#include "ui_eventos.h"
 
 typedef enum {
     UI_CB_OK = 0,
@@ -20,6 +21,7 @@ typedef enum {
 typedef struct {
     lat_mv *mv;
     int evento_id;
+    UITipoEvento evento_tipo;
     bool ejecutando;
     bool inutilizada;
     size_t llamadas;
@@ -32,6 +34,7 @@ UICBResultado ui_cb_inicializar(UICBContexto *ctx, lat_mv *mv);
 UICBResultado ui_cb_registrar(UICBContexto *ctx);
 UICBResultado ui_cb_despachar(UICBContexto *ctx, const char *nombre,
                              int evento_id);
+UICBResultado ui_cb_despachar_evento(UICBContexto *ctx, const char *nombre, UIEvento evento);
 void ui_cb_desregistrar(UICBContexto *ctx);
 
 #endif

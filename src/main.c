@@ -1,3 +1,4 @@
+#include "ui_utf8.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -754,8 +755,8 @@ static long obtener_ram_kb(void)
 static void mostrar_notificacion_toast(const char *msg)
 {
     if (msg == NULL) return;
-    snprintf(texto_toast, sizeof(texto_toast), "%s", msg);
-    snprintf(estado_sistema, sizeof(estado_sistema), "%s", msg);
+    (void)ui_utf8_copiar_seguro(texto_toast, sizeof texto_toast, msg);
+    (void)ui_utf8_copiar_seguro(estado_sistema, sizeof estado_sistema, msg);
     tiempo_toast = 3.5f;
 }
 

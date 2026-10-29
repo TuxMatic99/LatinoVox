@@ -16,7 +16,14 @@ static void ffi_id_actual(lat_mv *mv)
     latC_apilar_double(mv, (double)registro->evento_id);
 }
 
+static void ffi_tipo_actual(lat_mv *mv) {
+    if (!registro || registro->mv != mv || !registro->ejecutando) {
+        latC_error(mv, "ui_cb.tipo_actual fuera de un evento"); return;
+    }
+    latC_apilar_double(mv, (double)registro->evento_tipo);
+}
 static const lat_CReg lib_ui_cb[] = {
+    {"tipo_actual", ffi_tipo_actual, 0},
     {"id_actual", ffi_id_actual, 0},
     {NULL, NULL, 0}
 };
@@ -42,10 +49,10 @@ UICBResultado ui_cb_registrar(UICBContexto *ctx)
     return UI_CB_OK;
 }
 
-UICBResultado ui_cb_despachar(UICBContexto *ctx, const char *nombre,
-                             int evento_id)
+UICBResultado ui_cb_despachar_evento(UICBContexto *ctx, const char *nombre, UIEvento evento)
 {
-    if (!ctx || !nombre || !*nombre || !ctx->mv)
+    if (!ctx || !nombre || !*nombre || !ctx->mv || evento.id_widget < 0 ||
+        evento.tipo < UI_EVENTO_CLIC || evento.tipo > UI_EVENTO_CANCELAR)
         return UI_CB_ARGUMENTO_INVALIDO;
     if (registro != ctx) return UI_CB_NO_REGISTRADO;
     if (ctx->inutilizada) return UI_CB_VM_NO_DISPONIBLE;
@@ -64,7 +71,8 @@ UICBResultado ui_cb_despachar(UICBContexto *ctx, const char *nombre,
     if (func->tipo != T_FUN || func->nparams != 0)
         return UI_CB_FIRMA_INVALIDA;
 
-    ctx->evento_id = evento_id;
+    ctx->evento_id = evento.id_widget;
+    ctx->evento_tipo = evento.tipo;
     ctx->ejecutando = true;
     ctx->llamadas++;
     int estado = latC_llamar_funcion(mv, func);
@@ -88,4 +96,8 @@ void ui_cb_desregistrar(UICBContexto *ctx)
     if (ctx && registro == ctx && !ctx->ejecutando) {
         registro = NULL;
     }
+}
+
+UICBResultado ui_cb_despachar(UICBContexto *ctx, const char *nombre, int id) {
+    return ui_cb_despachar_evento(ctx,nombre,(UIEvento){UI_EVENTO_CLIC,id});
 }

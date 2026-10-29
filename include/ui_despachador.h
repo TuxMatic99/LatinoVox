@@ -29,6 +29,7 @@ typedef enum {
 } UIDespachoCallbackResultado;
 
 typedef UIDespachoCallbackResultado (*UIDespachoCallback)(void *usuario, int id);
+typedef UIDespachoCallbackResultado (*UIDespachoEventoCallback)(void *usuario, UIEvento evento);
 typedef bool (*UIDespachoReloj)(void *usuario, double *milisegundos);
 
 typedef struct {
@@ -42,11 +43,13 @@ typedef struct {
     size_t cortes_por_limite;
     size_t pendientes_ultimo_frame;
     double ultimo_tiempo_frame_ms;
+    double max_callback_ms;
 } UIDespachoMetricas;
 
 typedef struct {
     UIColaEventos *cola; /* prestada: pertenece al llamador */
     UIDespachoCallback callback;
+    UIDespachoEventoCallback callback_evento;
     void *usuario_callback;
     UIDespachoReloj reloj;
     void *usuario_reloj;
@@ -62,6 +65,10 @@ bool ui_despachador_reloj_monotonico(void *usuario, double *milisegundos);
 UIDespachoResultado ui_despachador_inicializar(
     UIDespachador *desp, UIColaEventos *cola,
     UIDespachoCallback callback, void *usuario_callback);
+
+UIDespachoResultado ui_despachador_inicializar_eventos(
+    UIDespachador *desp, UIColaEventos *cola,
+    UIDespachoEventoCallback callback, void *usuario_callback);
 
 void ui_despachador_configurar_reloj(
     UIDespachador *desp, UIDespachoReloj reloj, void *usuario_reloj);

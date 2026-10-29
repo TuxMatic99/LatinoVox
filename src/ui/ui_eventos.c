@@ -25,7 +25,7 @@ UIEventosResultado ui_eventos_inicializar(UIColaEventos *cola,
 
 UIEventosResultado ui_eventos_encolar(UIColaEventos *cola, UIEvento evento)
 {
-    if (!cola_valida(cola) || evento.tipo != UI_EVENTO_CLIC || evento.id_widget < 0)
+    if (!cola_valida(cola) || (evento.tipo < UI_EVENTO_CLIC || evento.tipo > UI_EVENTO_CANCELAR) || evento.id_widget < 0)
         return UI_EVENTOS_ARGUMENTO_INVALIDO;
     if (cola->cantidad == cola->capacidad)
         return UI_EVENTOS_LLENO;

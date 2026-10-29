@@ -3,7 +3,9 @@
 #include <stddef.h>
 
 typedef enum {
-    UI_EVENTO_CLIC = 1
+    UI_EVENTO_CLIC = 1,
+    UI_EVENTO_SUBMIT = 2,
+    UI_EVENTO_CANCELAR = 3
 } UITipoEvento;
 
 typedef struct {

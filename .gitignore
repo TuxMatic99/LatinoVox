@@ -16,3 +16,7 @@ mundo_chunks_v08.dat
 *.antes_filas
 
 /build-asan/
+/build-asan-*/
+/build-release-*/
+
+build-*/

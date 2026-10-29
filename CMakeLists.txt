@@ -278,9 +278,13 @@ target_link_libraries(host_ui
         m
 )
 
+# El motor reutiliza el mismo UTF-8 estricto, sin depender del catálogo.
+target_sources(motor PRIVATE src/ui/ui_utf8.c)
+
 # LatinoUI Runtime: administracion independiente de widgets
 add_library(latino_ui_runtime STATIC
     src/ui/ui_runtime.c
+    src/ui/ui_utf8.c
 )
 
 target_include_directories(latino_ui_runtime
@@ -347,9 +351,6 @@ target_link_libraries(host_ui
         latino_ui_eventos
 )
 
-# Añadir UNA vez al final de CMakeLists.txt (dentro del proyecto LatinoVox).
-# Requiere LATINO_INCLUDE_DIR y LATINO_LIBRARY ya definidos por el proyecto.
-
 add_library(latino_ui_callbacks STATIC src/ui/ui_callbacks.c)
 target_include_directories(latino_ui_callbacks PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -365,9 +366,6 @@ if(BUILD_TESTING)
         COMMAND test_ui_callbacks
             "${CMAKE_CURRENT_SOURCE_DIR}/scripts/prueba_callbacks.lat")
 endif()
-
-# NO vincular todavía host_ui ni modificar src/main.c.
-
 
 # LatinoUI despachador independiente v0.1
 add_library(latino_ui_despachador STATIC src/ui/ui_despachador.c)
@@ -392,3 +390,23 @@ target_link_libraries(host_ui PRIVATE
     latino_ui_despachador
     latino_ui_callbacks
 )
+
+include(cmake/LatinoUICatalogo.cmake)
+include(cmake/LatinoUIHostTests.cmake)
+if(TARGET test_ui_host)
+    target_link_libraries(test_ui_host PRIVATE latino_ui_biblioteca)
+endif()
+
+# Las pruebas previas usan assert: Release tambien debe ejecutar sus comprobaciones.
+if(BUILD_TESTING)
+    get_property(_ui_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(_ui_target IN LISTS _ui_targets)
+        if(_ui_target MATCHES "^test_")
+            if(MSVC)
+                target_compile_options(${_ui_target} PRIVATE /UNDEBUG)
+            elseif(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+                target_compile_options(${_ui_target} PRIVATE -UNDEBUG)
+            endif()
+        endif()
+    endforeach()
+endif()
